@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <meta name="theme-color" content="#071018" />
+    <meta
+      name="description"
+      content="Ferrofall is a deterministic, modern falling-block puzzle game built in Rust and WebAssembly."
+    />
+    <title>Ferrofall</title>
+
+    <base data-trunk-public-url />
+    <link data-trunk rel="rust" data-wasm-opt="0" />
+    <link data-trunk rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+        background: #071018;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body,
+      #app_shell {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      body {
+        background:
+          linear-gradient(rgba(28, 49, 61, 0.22) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(28, 49, 61, 0.22) 1px, transparent 1px),
+          #071018;
+        background-size: 32px 32px;
+      }
+
+      #ferrofall_canvas {
+        position: absolute;
+        inset: 0;
+        display: block;
+        width: 100%;
+        height: 100%;
+        border: 0;
+        outline: 0;
+        touch-action: none;
+      }
+
+      #loading {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-content: center;
+        gap: 22px;
+        color: #dae2e6;
+        text-align: center;
+        letter-spacing: 0.12em;
+      }
+
+      #loading h1 {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        font-size: clamp(2rem, 7vw, 3rem);
+        letter-spacing: 0.08em;
+      }
+
+      #loading p {
+        max-width: 32rem;
+        margin: 0;
+        color: #7e94a0;
+        font-size: 0.8rem;
+        line-height: 1.6;
+      }
+
+      .loader_mark {
+        display: grid;
+        grid-template-columns: repeat(3, 14px);
+        grid-template-rows: repeat(4, 14px);
+        justify-content: center;
+        gap: 2px;
+        filter: drop-shadow(0 0 16px rgba(225, 153, 42, 0.25));
+      }
+
+      .loader_mark span {
+        border: 1px solid #ffc754;
+        background: #e1992a;
+        animation: pulse 1.4s ease-in-out infinite alternate;
+      }
+
+      .loader_mark span:nth-child(1) {
+        grid-column: 1;
+        grid-row: 1;
+      }
+
+      .loader_mark span:nth-child(2) {
+        grid-column: 2;
+        grid-row: 1;
+        animation-delay: 100ms;
+      }
+
+      .loader_mark span:nth-child(3) {
+        grid-column: 3;
+        grid-row: 1;
+        animation-delay: 200ms;
+      }
+
+      .loader_mark span:nth-child(4) {
+        grid-column: 1;
+        grid-row: 2;
+        animation-delay: 300ms;
+      }
+
+      .loader_mark span:nth-child(5) {
+        grid-column: 2;
+        grid-row: 2;
+        animation-delay: 400ms;
+      }
+
+      .loader_mark span:nth-child(6) {
+        grid-column: 1;
+        grid-row: 3;
+        animation-delay: 500ms;
+      }
+
+      .loader_mark span:nth-child(7) {
+        grid-column: 1;
+        grid-row: 4;
+        animation-delay: 600ms;
+      }
+
+      .sr_only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      @keyframes pulse {
+        from {
+          opacity: 0.45;
+        }
+
+        to {
+          opacity: 1;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .loader_mark span {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app_shell">
+      <canvas
+        id="ferrofall_canvas"
+        role="application"
+        aria-label="Ferrofall falling-block puzzle game"
+      ></canvas>
+      <section id="loading" aria-live="polite">
+        <div class="loader_mark" aria-hidden="true">
+          <span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span>
+        </div>
+        <h1>FERROFALL</h1>
+        <p>FORGING THE PLAYFIELD</p>
+        <noscript>Ferrofall requires JavaScript and WebAssembly.</noscript>
+      </section>
+      <p id="app_status" class="sr_only" role="status" aria-live="polite">
+        Ferrofall is loading.
+      </p>
+    </main>
+  </body>
+</html>
