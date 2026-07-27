@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use std::time::Duration;
 
 use eframe::egui::{self, Event, Key, Pos2, Rect, TouchId, TouchPhase};
@@ -8,7 +9,8 @@ use crate::audio::{AudioSystem, Cue, DEFAULT_VOLUME};
 use crate::game::{Action, Command, Game, GameConfig};
 use crate::platform;
 use crate::ui::{
-    AudioUiState, Screen, TouchControlAction, UiAction, UiOutput, UiState, VisualEffects,
+    AudioUiState, DISPLAY_FONT_FAMILY, Screen, TouchControlAction, UiAction, UiOutput, UiState,
+    VisualEffects,
 };
 
 const SIMULATION_STEP: Duration = Duration::from_nanos(1_000_000_000 / 60);
@@ -868,8 +870,37 @@ fn touch_to_game_action(action: TouchControlAction) -> Action {
     }
 }
 
-fn configure_egui(context: &egui::Context) {
+pub(crate) fn configure_egui(context: &egui::Context) {
     context.set_theme(egui::Theme::Dark);
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "saira-condensed-extra-bold".to_owned(),
+        Arc::new(egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/SairaCondensed-ExtraBold.ttf"
+        ))),
+    );
+    fonts.font_data.insert(
+        "ibm-plex-mono-medium".to_owned(),
+        Arc::new(egui::FontData::from_static(include_bytes!(
+            "../assets/fonts/IBMPlexMono-Medium.ttf"
+        ))),
+    );
+
+    let mut display_fonts = vec!["saira-condensed-extra-bold".to_owned()];
+    if let Some(fallbacks) = fonts.families.get(&egui::FontFamily::Proportional) {
+        display_fonts.extend(fallbacks.iter().cloned());
+    }
+    fonts.families.insert(
+        egui::FontFamily::Name(DISPLAY_FONT_FAMILY.into()),
+        display_fonts,
+    );
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .insert(0, "ibm-plex-mono-medium".to_owned());
+    context.set_fonts(fonts);
+
     let mut style = (*context.style_of(egui::Theme::Dark)).clone();
     style.animation_time = if platform::prefers_reduced_motion() {
         0.0

@@ -16,10 +16,28 @@
     <base data-trunk-public-url />
     <link data-trunk rel="rust" data-wasm-opt="0" />
     <link data-trunk rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link
+      data-trunk
+      rel="copy-file"
+      href="assets/fonts/SairaCondensed-ExtraBold.ttf"
+    />
+    <link
+      data-trunk
+      rel="copy-file"
+      href="assets/fonts/OFL-SairaCondensed.txt"
+    />
     <link data-trunk rel="copy-dir" href="assets/audio" />
     <script data-trunk src="assets/audio.js"></script>
 
     <style>
+      @font-face {
+        font-family: "Saira Condensed";
+        src: url("SairaCondensed-ExtraBold.ttf") format("truetype");
+        font-style: normal;
+        font-weight: 800;
+        font-display: swap;
+      }
+
       :root {
         color-scheme: dark;
         font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
@@ -91,9 +109,11 @@
 
       #loading h1 {
         margin: 0;
-        font-family: system-ui, sans-serif;
-        font-size: clamp(2rem, 7vw, 3rem);
-        letter-spacing: 0.08em;
+        font-family: "Saira Condensed", system-ui, sans-serif;
+        font-size: clamp(2.4rem, 8vw, 3.4rem);
+        font-weight: 800;
+        line-height: 0.9;
+        letter-spacing: 0.045em;
       }
 
       #loading p {

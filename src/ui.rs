@@ -4,6 +4,7 @@ use std::time::Duration;
 use eframe::egui::RichText;
 use eframe::egui::{
     self, Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2, pos2,
+    text::{LayoutJob, TextFormat},
     vec2,
 };
 use web_time::Instant;
@@ -28,6 +29,8 @@ const AMBER_BRIGHT: Color32 = Color32::from_rgb(244, 177, 66);
 const BUTTON_HOUSING: Color32 = Color32::from_rgb(3, 9, 15);
 const BUTTON_FACE: Color32 = Color32::from_rgb(10, 23, 33);
 const BUTTON_FACE_HOVER: Color32 = Color32::from_rgb(18, 36, 47);
+pub(crate) const DISPLAY_FONT_FAMILY: &str = "ferrofall-display";
+const WORDMARK_TRACKING_EM: f32 = 0.045;
 const BUTTON_FACE_ACTIVE: Color32 = Color32::from_rgb(28, 48, 59);
 const BUTTON_EDGE_HOVER: Color32 = Color32::from_rgb(135, 158, 169);
 const LINE_FLASH_DURATION: Duration = Duration::from_millis(150);
@@ -438,7 +441,8 @@ fn show_title(ui: &mut egui::Ui, rect: Rect, touch_controls: bool) -> UiAction {
         pos2(center.x, mark_y),
         if compact { 17.0 } else { 22.0 },
     );
-    painter.text(
+    paint_wordmark(
+        &painter,
         pos2(
             center.x,
             if compact {
@@ -449,7 +453,7 @@ fn show_title(ui: &mut egui::Ui, rect: Rect, touch_controls: bool) -> UiAction {
         ),
         Align2::CENTER_CENTER,
         "FERROFALL",
-        display_font(if compact { 36.0 } else { 46.0 }),
+        if compact { 40.0 } else { 52.0 },
         TEXT,
     );
 
@@ -486,10 +490,12 @@ fn show_title(ui: &mut egui::Ui, rect: Rect, touch_controls: bool) -> UiAction {
         Align2::CENTER_TOP,
         if touch_controls {
             "TWO-THUMB CONTROLS  ·  TAP PAUSE ANY TIME"
+        } else if compact {
+            "ENTER  PLAY    ·    ESC  PAUSE\nR  RESTART    ·    M  MUTE"
         } else {
             "ENTER  PLAY    ·    ESC  PAUSE    ·    R  RESTART    ·    M  MUTE"
         },
-        label_font(if compact { 9.5 } else { 12.0 }),
+        label_font(if compact { 10.0 } else { 12.0 }),
         MUTED,
     );
 
@@ -517,15 +523,16 @@ fn show_game(
     let layout = GameLayout::new(rect, layout_mode);
     let painter = ui.painter().clone();
 
-    painter.text(
+    paint_wordmark(
+        &painter,
         layout.header.left_top(),
         Align2::LEFT_TOP,
         "FERROFALL",
-        display_font(if layout_mode == LayoutMode::Desktop {
-            28.0
+        if layout_mode == LayoutMode::Desktop {
+            30.0
         } else {
-            21.0
-        }),
+            23.0
+        },
         TEXT,
     );
     let header_button = if layout_mode == LayoutMode::Desktop {
@@ -2123,7 +2130,7 @@ fn piece_color(kind: Tetromino) -> Color32 {
 }
 
 fn display_font(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Proportional)
+    FontId::new(size, FontFamily::Name(DISPLAY_FONT_FAMILY.into()))
 }
 
 fn number_font(size: f32) -> FontId {
@@ -2132,6 +2139,26 @@ fn number_font(size: f32) -> FontId {
 
 fn label_font(size: f32) -> FontId {
     FontId::new(size, FontFamily::Monospace)
+}
+
+fn paint_wordmark(
+    painter: &Painter,
+    pos: Pos2,
+    anchor: Align2,
+    text: &str,
+    size: f32,
+    color: Color32,
+) -> Rect {
+    let format = TextFormat {
+        font_id: display_font(size),
+        extra_letter_spacing: size * WORDMARK_TRACKING_EM,
+        color,
+        ..Default::default()
+    };
+    let galley = painter.layout_job(LayoutJob::single_section(text.to_owned(), format));
+    let rect = anchor.anchor_size(pos, galley.size());
+    painter.galley(rect.min, galley, color);
+    rect
 }
 
 fn format_number(value: u64) -> String {
@@ -2317,6 +2344,7 @@ mod tests {
     #[test]
     fn title_screen_produces_paint_shapes() {
         let context = egui::Context::default();
+        crate::app::configure_egui(&context);
         let output = context.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(960.0, 720.0))),
@@ -2351,6 +2379,7 @@ mod tests {
     #[test]
     fn unsupported_browser_screen_produces_paint_shapes() {
         let context = egui::Context::default();
+        crate::app::configure_egui(&context);
         let output = context.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(720.0, 560.0))),

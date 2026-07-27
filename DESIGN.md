@@ -419,9 +419,13 @@ The palette uses a true near-black navy background, charcoal-navy surfaces,
 cool-gray text, blue-gray grid lines, standard saturated piece colors, and a
 single warm amber status accent.
 
-Gameplay visuals are procedural egui primitives. No external fonts ship with
-the app. The native window icon is generated from embedded RGBA data, and the
-web shell ships a matching SVG favicon.
+Gameplay visuals are procedural egui primitives. The app locally bundles Saira
+Condensed ExtraBold for the wordmark and major headings, and IBM Plex Mono
+Medium for controls, labels, statistics, and numbers. Both fonts use the SIL
+Open Font License 1.1. The uppercase wordmark uses slightly open tracking in
+cool off-white, while the separate falling-block mark retains the amber accent.
+The native window icon is generated from embedded RGBA data, and the web shell
+ships a matching SVG favicon.
 
 Accessibility requirements include:
 

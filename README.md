@@ -123,4 +123,8 @@ The source licenses do not grant rights to the Ferrofall name or branding.
 Generated sound effects in `assets/audio` are separately dedicated to the
 public domain under CC0 1.0.
 
+Saira Condensed ExtraBold and IBM Plex Mono Medium are bundled under the SIL
+Open Font License 1.1. Their license texts and source details are in
+[`assets/fonts`](assets/fonts/README.md).
+
 [trunk]: https://trunk-rs.github.io/trunk/
