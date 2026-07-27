@@ -30,6 +30,10 @@ pub(crate) fn prefers_touch_controls() -> bool {
     imp::prefers_touch_controls()
 }
 
+pub(crate) fn prefers_reduced_motion() -> bool {
+    imp::prefers_reduced_motion()
+}
+
 pub(crate) fn fullscreen_available() -> bool {
     imp::fullscreen_available()
 }
@@ -87,6 +91,17 @@ mod imp {
             .and_then(|window| {
                 window
                     .match_media("(hover: none) and (pointer: coarse)")
+                    .ok()
+                    .flatten()
+            })
+            .is_some_and(|query| query.matches())
+    }
+
+    pub(super) fn prefers_reduced_motion() -> bool {
+        web_sys::window()
+            .and_then(|window| {
+                window
+                    .match_media("(prefers-reduced-motion: reduce)")
                     .ok()
                     .flatten()
             })
@@ -216,6 +231,10 @@ mod imp {
     }
 
     pub(super) fn prefers_touch_controls() -> bool {
+        false
+    }
+
+    pub(super) fn prefers_reduced_motion() -> bool {
         false
     }
 

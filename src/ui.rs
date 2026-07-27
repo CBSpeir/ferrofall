@@ -1,8 +1,10 @@
 use std::time::Duration;
 
+#[cfg(feature = "audio-lab")]
+use eframe::egui::RichText;
 use eframe::egui::{
-    self, Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, RichText, Stroke, StrokeKind,
-    Vec2, pos2, vec2,
+    self, Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2, pos2,
+    vec2,
 };
 use web_time::Instant;
 
@@ -22,8 +24,15 @@ const BORDER: Color32 = Color32::from_rgb(76, 99, 112);
 const TEXT: Color32 = Color32::from_rgb(218, 226, 230);
 const MUTED: Color32 = Color32::from_rgb(126, 148, 160);
 const AMBER: Color32 = Color32::from_rgb(225, 153, 42);
+const AMBER_BRIGHT: Color32 = Color32::from_rgb(244, 177, 66);
+const BUTTON_HOUSING: Color32 = Color32::from_rgb(3, 9, 15);
+const BUTTON_FACE: Color32 = Color32::from_rgb(10, 23, 33);
+const BUTTON_FACE_HOVER: Color32 = Color32::from_rgb(18, 36, 47);
+const BUTTON_FACE_ACTIVE: Color32 = Color32::from_rgb(28, 48, 59);
+const BUTTON_EDGE_HOVER: Color32 = Color32::from_rgb(135, 158, 169);
 const LINE_FLASH_DURATION: Duration = Duration::from_millis(150);
 const DROP_TRAIL_DURATION: Duration = Duration::from_millis(120);
+const BUTTON_ACTIVATION_DURATION: f64 = 0.12;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Screen {
@@ -88,9 +97,8 @@ impl TouchControlAction {
 
     const fn text_glyph(self) -> Option<&'static str> {
         match self {
-            Self::Left => Some("◀"),
+            Self::Left | Self::Right => None,
             Self::SoftDrop => Some("SOFT"),
-            Self::Right => Some("▶"),
             Self::Hold => Some("HOLD"),
             Self::RotateCounterclockwise | Self::RotateClockwise => None,
             Self::HardDrop => Some("DROP"),
@@ -1399,48 +1407,40 @@ fn paint_touch_controls(
             )
         });
         let is_active = active.contains(&control.action) || response.is_pointer_button_down_on();
-        let fill = if is_active {
-            if control.action == TouchControlAction::HardDrop {
-                Color32::from_rgb(229, 170, 62)
-            } else {
-                Color32::from_rgb(31, 51, 63)
-            }
+        let emphasis = if control.action == TouchControlAction::HardDrop {
+            ButtonEmphasis::Accent
         } else {
-            SURFACE_DEEP
+            ButtonEmphasis::Neutral
         };
-        let stroke = if control.action == TouchControlAction::HardDrop {
-            AMBER
-        } else if is_active {
-            TEXT
-        } else {
-            BORDER
-        };
-        ui.painter().rect_filled(control.rect, 7.0, fill);
-        ui.painter().rect_stroke(
+        let (face_rect, foreground) = paint_button_surface(
+            ui,
             control.rect,
-            7.0,
-            Stroke::new(if is_active { 1.8 } else { 1.1 }, stroke),
-            StrokeKind::Inside,
+            &response,
+            emphasis,
+            ButtonShape::Rounded { radius: 7.0 },
+            is_active,
+            ui.is_enabled(),
         );
-        let foreground = if is_active && control.action == TouchControlAction::HardDrop {
-            BACKGROUND
-        } else {
-            TEXT
-        };
         match control.action {
+            TouchControlAction::Left => {
+                paint_direction_icon(ui.painter(), face_rect, false, foreground);
+            }
+            TouchControlAction::Right => {
+                paint_direction_icon(ui.painter(), face_rect, true, foreground);
+            }
             TouchControlAction::RotateCounterclockwise => {
-                paint_rotation_icon(ui.painter(), control.rect, false, foreground);
+                paint_rotation_icon(ui.painter(), face_rect, false, foreground);
             }
             TouchControlAction::RotateClockwise => {
-                paint_rotation_icon(ui.painter(), control.rect, true, foreground);
+                paint_rotation_icon(ui.painter(), face_rect, true, foreground);
             }
             action => {
                 ui.painter().text(
-                    control.rect.center(),
+                    face_rect.center(),
                     Align2::CENTER_CENTER,
                     action
                         .text_glyph()
-                        .expect("non-rotation touch controls must have text glyphs"),
+                        .expect("labeled touch controls must have text glyphs"),
                     if matches!(
                         action,
                         TouchControlAction::Hold
@@ -1456,6 +1456,20 @@ fn paint_touch_controls(
             }
         }
     }
+}
+
+fn paint_direction_icon(painter: &Painter, rect: Rect, right: bool, color: Color32) {
+    let direction = if right { 1.0 } else { -1.0 };
+    let center = rect.center();
+    let half_width = (rect.width() * 0.16).clamp(8.0, 11.0);
+    let half_height = (rect.height() * 0.12).clamp(6.0, 8.0);
+    let tip = pos2(center.x + direction * half_width, center.y);
+    let tail = pos2(center.x - direction * half_width * 0.8, center.y);
+    let elbow = pos2(center.x + direction * half_width * 0.15, center.y);
+    let stroke = Stroke::new((rect.height() * 0.045).clamp(2.2, 2.8), color);
+    painter.line_segment([tail, tip], stroke);
+    painter.line_segment([pos2(elbow.x, center.y - half_height), tip], stroke);
+    painter.line_segment([pos2(elbow.x, center.y + half_height), tip], stroke);
 }
 
 fn paint_rotation_icon(painter: &Painter, rect: Rect, clockwise: bool, color: Color32) {
@@ -1566,25 +1580,22 @@ fn show_audio_control(
         )
     });
 
-    let fill = if response.is_pointer_button_down_on() {
-        Color32::from_rgb(25, 42, 53)
-    } else if response.hovered() && audio.available {
-        Color32::from_rgb(18, 34, 45)
-    } else {
-        SURFACE_DEEP
-    };
-    ui.painter().rect_filled(button_rect, 2.0, fill);
-    ui.painter().rect_stroke(
+    let (face_rect, foreground) = paint_button_surface(
+        ui,
         button_rect,
-        2.0,
-        Stroke::new(1.0, if audio.available { BORDER } else { GRID }),
-        StrokeKind::Inside,
+        &response,
+        ButtonEmphasis::Neutral,
+        ButtonShape::Rounded {
+            radius: (button_rect.height() * 0.14).clamp(4.0, 7.0),
+        },
+        false,
+        audio.available,
     );
     paint_speaker_icon(
         ui.painter(),
-        button_rect,
+        face_rect,
         audio.muted || audio.volume <= 0.0,
-        if audio.available { TEXT } else { MUTED },
+        foreground,
     );
 
     if let Some(notice) = audio.notice {
@@ -1818,21 +1829,250 @@ fn paint_overlay(ui: &mut egui::Ui, rect: Rect, overlay: Overlay) -> UiAction {
     }
 }
 
-fn styled_button(ui: &mut egui::Ui, rect: Rect, label: &str, primary: bool) -> bool {
-    let fill = if primary { AMBER } else { SURFACE_DEEP };
-    let text_color = if primary { BACKGROUND } else { TEXT };
-    ui.put(
+#[derive(Clone, Copy)]
+enum ButtonEmphasis {
+    Neutral,
+    Primary,
+    Accent,
+}
+
+#[derive(Clone, Copy)]
+enum ButtonShape {
+    Clipped { cut: f32 },
+    Rounded { radius: f32 },
+}
+
+fn paint_button_surface(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    response: &egui::Response,
+    emphasis: ButtonEmphasis,
+    shape: ButtonShape,
+    active: bool,
+    enabled: bool,
+) -> (Rect, Color32) {
+    let pressed = enabled && (active || response.is_pointer_button_down_on());
+    let hover_amount = ui.ctx().animate_bool_with_time(
+        response.id.with("button_hover"),
+        enabled && response.hovered() && !pressed,
+        ui.style().animation_time,
+    );
+
+    let now = ui.input(|input| input.time);
+    let activation_id = response.id.with("button_activation");
+    if response.clicked() {
+        ui.data_mut(|data| data.insert_temp(activation_id, now));
+    }
+    let activation_amount =
+        ui.data(|data| data.get_temp::<f64>(activation_id))
+            .map_or(0.0, |activated_at| {
+                (1.0 - (now - activated_at) / BUTTON_ACTIVATION_DURATION).clamp(0.0, 1.0) as f32
+            });
+    if activation_amount > 0.0 {
+        ui.ctx().request_repaint();
+    }
+
+    let (rest_fill, hover_fill, pressed_fill, rest_edge, hover_edge, mut foreground) =
+        match emphasis {
+            ButtonEmphasis::Primary => (
+                AMBER,
+                AMBER_BRIGHT,
+                Color32::from_rgb(200, 127, 25),
+                AMBER,
+                AMBER_BRIGHT,
+                BACKGROUND,
+            ),
+            ButtonEmphasis::Accent if active => (
+                AMBER,
+                AMBER_BRIGHT,
+                Color32::from_rgb(200, 127, 25),
+                AMBER,
+                AMBER_BRIGHT,
+                BACKGROUND,
+            ),
+            ButtonEmphasis::Accent => (
+                BUTTON_FACE,
+                BUTTON_FACE_HOVER,
+                BUTTON_FACE_ACTIVE,
+                AMBER,
+                AMBER_BRIGHT,
+                TEXT,
+            ),
+            ButtonEmphasis::Neutral => (
+                if active {
+                    BUTTON_FACE_ACTIVE
+                } else {
+                    BUTTON_FACE
+                },
+                BUTTON_FACE_HOVER,
+                BUTTON_FACE_ACTIVE,
+                if active { TEXT } else { BORDER },
+                BUTTON_EDGE_HOVER,
+                TEXT,
+            ),
+        };
+    if !enabled {
+        foreground = MUTED;
+    }
+
+    let mut face_fill = rest_fill.lerp_to_gamma(hover_fill, hover_amount);
+    let mut edge = rest_edge.lerp_to_gamma(hover_edge, hover_amount);
+    if pressed {
+        face_fill = pressed_fill;
+    }
+    if activation_amount > 0.0 {
+        edge = edge.lerp_to_gamma(AMBER_BRIGHT, activation_amount);
+    }
+    if !enabled {
+        face_fill = BUTTON_FACE.gamma_multiply(0.68);
+        edge = GRID;
+    }
+
+    paint_button_shape(
+        ui.painter(),
         rect,
-        egui::Button::new(
-            RichText::new(label)
-                .font(label_font(13.0))
-                .color(text_color),
-        )
-        .fill(fill)
-        .stroke(Stroke::new(1.0, if primary { AMBER } else { BORDER }))
-        .corner_radius(2.0),
-    )
-    .clicked()
+        shape,
+        BUTTON_HOUSING,
+        Stroke::new(1.0, Color32::from_rgb(22, 39, 49)),
+    );
+
+    let lift = if pressed { 1.5 } else { -0.8 * hover_amount };
+    let mut face_rect = rect.shrink(2.0);
+    face_rect.max.y -= 2.0;
+    face_rect = face_rect.translate(vec2(0.0, lift));
+    let face_shape = match shape {
+        ButtonShape::Clipped { cut } => ButtonShape::Clipped {
+            cut: (cut - 1.0).max(2.0),
+        },
+        ButtonShape::Rounded { radius } => ButtonShape::Rounded {
+            radius: (radius - 2.0).max(2.0),
+        },
+    };
+    paint_button_shape(
+        ui.painter(),
+        face_rect,
+        face_shape,
+        face_fill,
+        Stroke::new(if pressed { 1.35 } else { 1.1 }, edge),
+    );
+
+    let highlight = match emphasis {
+        ButtonEmphasis::Primary => {
+            Color32::from_rgba_unmultiplied(255, 225, 158, if pressed { 48 } else { 120 })
+        }
+        ButtonEmphasis::Accent if active => {
+            Color32::from_rgba_unmultiplied(255, 225, 158, if pressed { 48 } else { 120 })
+        }
+        ButtonEmphasis::Neutral | ButtonEmphasis::Accent => {
+            Color32::from_rgba_unmultiplied(175, 200, 210, if pressed { 28 } else { 82 })
+        }
+    };
+    paint_button_highlight(ui.painter(), face_rect, face_shape, highlight);
+
+    if response.has_focus() {
+        paint_focus_brackets(ui.painter(), rect, AMBER_BRIGHT);
+    }
+
+    (face_rect, foreground)
+}
+
+fn paint_button_shape(
+    painter: &Painter,
+    rect: Rect,
+    shape: ButtonShape,
+    fill: Color32,
+    stroke: Stroke,
+) {
+    match shape {
+        ButtonShape::Clipped { cut } => {
+            painter.add(egui::Shape::convex_polygon(
+                clipped_rect_points(rect, cut),
+                fill,
+                stroke,
+            ));
+        }
+        ButtonShape::Rounded { radius } => {
+            painter.rect_filled(rect, radius, fill);
+            painter.rect_stroke(rect, radius, stroke, StrokeKind::Inside);
+        }
+    }
+}
+
+fn clipped_rect_points(rect: Rect, cut: f32) -> Vec<Pos2> {
+    let cut = cut.clamp(0.0, rect.width().min(rect.height()) * 0.25);
+    vec![
+        pos2(rect.left() + cut, rect.top()),
+        pos2(rect.right() - cut, rect.top()),
+        pos2(rect.right(), rect.top() + cut),
+        pos2(rect.right(), rect.bottom() - cut),
+        pos2(rect.right() - cut, rect.bottom()),
+        pos2(rect.left() + cut, rect.bottom()),
+        pos2(rect.left(), rect.bottom() - cut),
+        pos2(rect.left(), rect.top() + cut),
+    ]
+}
+
+fn paint_button_highlight(painter: &Painter, rect: Rect, shape: ButtonShape, color: Color32) {
+    let inset = match shape {
+        ButtonShape::Clipped { cut } => cut + 1.0,
+        ButtonShape::Rounded { radius } => radius + 1.0,
+    };
+    painter.line_segment(
+        [
+            pos2(rect.left() + inset, rect.top() + 0.8),
+            pos2(rect.right() - inset, rect.top() + 0.8),
+        ],
+        Stroke::new(0.8, color),
+    );
+}
+
+fn paint_focus_brackets(painter: &Painter, rect: Rect, color: Color32) {
+    let rect = rect.expand(3.0);
+    let length = 8.0_f32.min(rect.width() * 0.18);
+    let stroke = Stroke::new(1.4, color);
+    for (corner, horizontal, vertical) in [
+        (rect.left_top(), vec2(length, 0.0), vec2(0.0, length)),
+        (rect.right_top(), vec2(-length, 0.0), vec2(0.0, length)),
+        (rect.left_bottom(), vec2(length, 0.0), vec2(0.0, -length)),
+        (rect.right_bottom(), vec2(-length, 0.0), vec2(0.0, -length)),
+    ] {
+        painter.line_segment([corner, corner + horizontal], stroke);
+        painter.line_segment([corner, corner + vertical], stroke);
+    }
+}
+
+fn styled_button(ui: &mut egui::Ui, rect: Rect, label: &str, primary: bool) -> bool {
+    let response = ui.interact(
+        rect,
+        ui.make_persistent_id(("styled_button", label, primary)),
+        egui::Sense::click(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
+    let (face_rect, foreground) = paint_button_surface(
+        ui,
+        rect,
+        &response,
+        if primary {
+            ButtonEmphasis::Primary
+        } else {
+            ButtonEmphasis::Neutral
+        },
+        ButtonShape::Clipped {
+            cut: (rect.height() * 0.12).clamp(3.0, 6.0),
+        },
+        false,
+        ui.is_enabled(),
+    );
+    ui.painter().text(
+        face_rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        label_font((rect.height() * 0.27).clamp(10.0, 13.0)),
+        foreground,
+    );
+    response.clicked()
 }
 
 fn pause_button(ui: &mut egui::Ui, rect: Rect) -> bool {
@@ -1844,26 +2084,27 @@ fn pause_button(ui: &mut egui::Ui, rect: Rect) -> bool {
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Pause")
     });
-    let fill = if response.is_pointer_button_down_on() {
-        Color32::from_rgb(25, 42, 53)
-    } else if response.hovered() {
-        Color32::from_rgb(18, 34, 45)
-    } else {
-        SURFACE_DEEP
-    };
-    ui.painter().rect_filled(rect, 2.0, fill);
-    ui.painter()
-        .rect_stroke(rect, 2.0, Stroke::new(1.0, BORDER), StrokeKind::Inside);
-    let bar_height = rect.height() * 0.36;
+    let (face_rect, foreground) = paint_button_surface(
+        ui,
+        rect,
+        &response,
+        ButtonEmphasis::Neutral,
+        ButtonShape::Rounded {
+            radius: (rect.height() * 0.14).clamp(4.0, 7.0),
+        },
+        false,
+        ui.is_enabled(),
+    );
+    let bar_height = face_rect.height() * 0.36;
     let bar_width = 2.0;
     for offset in [-4.0, 4.0] {
         ui.painter().rect_filled(
             Rect::from_center_size(
-                pos2(rect.center().x + offset, rect.center().y),
+                pos2(face_rect.center().x + offset, face_rect.center().y),
                 vec2(bar_width, bar_height),
             ),
             0.0,
-            TEXT,
+            foreground,
         );
     }
     response.clicked()

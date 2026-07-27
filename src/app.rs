@@ -871,7 +871,11 @@ fn touch_to_game_action(action: TouchControlAction) -> Action {
 fn configure_egui(context: &egui::Context) {
     context.set_theme(egui::Theme::Dark);
     let mut style = (*context.style_of(egui::Theme::Dark)).clone();
-    style.animation_time = 0.12;
+    style.animation_time = if platform::prefers_reduced_motion() {
+        0.0
+    } else {
+        0.10
+    };
     style.spacing.button_padding = egui::vec2(22.0, 10.0);
     style.spacing.item_spacing = egui::vec2(10.0, 10.0);
     style.visuals = egui::Visuals::dark();
