@@ -297,10 +297,10 @@ movement action and a rotation at the same time.
 
 Movement controls emit normal engine press and release commands, preserving
 delayed auto-shift and repeat timing. Sliding between movement buttons releases
-the previous action and presses the new one. Hold and rotations fire on touch
-start. Hard Drop arms on touch start, fires only on touch end inside its
-button, and permanently disarms for that contact when the finger slides away.
-Touch cancellation releases every action without firing Hard Drop.
+the previous action and presses the new one. Hold fires on touch start.
+Rotations and Hard Drop arm on touch start, fire only on touch end inside their
+button, and permanently disarm for that contact when the finger slides away.
+Touch cancellation releases every action without firing a release action.
 
 Losing window focus pauses immediately, freezes all simulation timers, and
 clears held keyboard and touch state. Returning focus does not resume

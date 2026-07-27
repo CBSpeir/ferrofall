@@ -37,7 +37,10 @@ impl ViewportOrientation {
 enum TouchBinding {
     Held(Option<TouchControlAction>),
     Immediate(TouchControlAction),
-    HardDrop { armed: bool },
+    ReleaseAction {
+        action: TouchControlAction,
+        armed: bool,
+    },
     Ignored,
 }
 
@@ -46,8 +49,11 @@ impl TouchBinding {
         match self {
             Self::Held(action) => action,
             Self::Immediate(action) => Some(action),
-            Self::HardDrop { armed: true } => Some(TouchControlAction::HardDrop),
-            Self::HardDrop { armed: false } | Self::Ignored => None,
+            Self::ReleaseAction {
+                action,
+                armed: true,
+            } => Some(action),
+            Self::ReleaseAction { armed: false, .. } | Self::Ignored => None,
         }
     }
 }
@@ -373,7 +379,7 @@ impl FerrofallApp {
             .and_then(|binding| match binding {
                 TouchBinding::Held(action) => *action,
                 TouchBinding::Immediate(_)
-                | TouchBinding::HardDrop { .. }
+                | TouchBinding::ReleaseAction { .. }
                 | TouchBinding::Ignored => None,
             });
         if current == next {
@@ -415,22 +421,22 @@ impl FerrofallApp {
                     game.apply(Command::Release(action));
                 }
             }
-            TouchBinding::HardDrop { armed }
+            TouchBinding::ReleaseAction { action, armed }
                 if phase == TouchPhase::End
                     && armed
                     && crate::ui::touch_control_layout(
                         viewport,
                         crate::ui::layout_mode(viewport, true),
                     )
-                    .is_some_and(|layout| layout.contains(TouchControlAction::HardDrop, pos)) =>
+                    .is_some_and(|layout| layout.contains(action, pos)) =>
             {
                 if let Some(game) = self.game.as_mut() {
-                    game.apply(Command::Press(Action::HardDrop));
+                    game.apply(Command::Press(touch_to_game_action(action)));
                 }
             }
             TouchBinding::Held(None)
             | TouchBinding::Immediate(_)
-            | TouchBinding::HardDrop { .. }
+            | TouchBinding::ReleaseAction { .. }
             | TouchBinding::Ignored => {}
         }
     }
@@ -465,9 +471,18 @@ impl FerrofallApp {
                         self.touch_contacts.insert(id, TouchBinding::Held(None));
                         self.set_touch_held(id, Some(action));
                     }
-                    Some(TouchControlAction::HardDrop) => {
-                        self.touch_contacts
-                            .insert(id, TouchBinding::HardDrop { armed: true });
+                    Some(
+                        action @ (TouchControlAction::RotateCounterclockwise
+                        | TouchControlAction::RotateClockwise
+                        | TouchControlAction::HardDrop),
+                    ) => {
+                        self.touch_contacts.insert(
+                            id,
+                            TouchBinding::ReleaseAction {
+                                action,
+                                armed: true,
+                            },
+                        );
                     }
                     Some(action) => {
                         if let Some(game) = self.game.as_mut() {
@@ -485,11 +500,12 @@ impl FerrofallApp {
                 Some(TouchBinding::Held(_)) => {
                     self.set_touch_held(id, layout.held_action_at(pos));
                 }
-                Some(TouchBinding::HardDrop { armed }) => {
+                Some(TouchBinding::ReleaseAction { action, armed }) => {
                     self.touch_contacts.insert(
                         id,
-                        TouchBinding::HardDrop {
-                            armed: armed && layout.contains(TouchControlAction::HardDrop, pos),
+                        TouchBinding::ReleaseAction {
+                            action,
+                            armed: armed && layout.contains(action, pos),
                         },
                     );
                 }
@@ -1102,6 +1118,52 @@ mod tests {
         app.handle_touch_event(TouchId(2), TouchPhase::End, hard_drop, viewport);
         app.game.as_mut().unwrap().step();
         assert_eq!(locked_cell_count(app.game.as_ref().unwrap()), 4);
+    }
+
+    #[test]
+    fn rotation_requires_release_inside_its_control() {
+        let mut app = FerrofallApp::initial_state();
+        app.start_game();
+        let viewport = Rect::from_min_size(Pos2::ZERO, egui::vec2(360.0, 640.0));
+        let controls =
+            crate::ui::touch_control_layout(viewport, crate::ui::LayoutMode::CompactPortrait)
+                .unwrap();
+        let clockwise = controls
+            .rect_for(TouchControlAction::RotateClockwise)
+            .center();
+        let outside = viewport.center();
+        app.game.as_mut().unwrap().drain_events().for_each(drop);
+
+        app.handle_touch_event(TouchId(1), TouchPhase::Start, clockwise, viewport);
+        assert!(
+            !app.game
+                .as_mut()
+                .unwrap()
+                .drain_events()
+                .any(|event| { matches!(event, crate::game::GameEvent::Rotated { .. }) })
+        );
+        app.handle_touch_event(TouchId(1), TouchPhase::End, clockwise, viewport);
+        app.game.as_mut().unwrap().step();
+        assert!(
+            app.game
+                .as_mut()
+                .unwrap()
+                .drain_events()
+                .any(|event| { matches!(event, crate::game::GameEvent::Rotated { .. }) })
+        );
+
+        app.handle_touch_event(TouchId(2), TouchPhase::Start, clockwise, viewport);
+        app.handle_touch_event(TouchId(2), TouchPhase::Move, outside, viewport);
+        app.handle_touch_event(TouchId(2), TouchPhase::Move, clockwise, viewport);
+        app.handle_touch_event(TouchId(2), TouchPhase::End, clockwise, viewport);
+        app.game.as_mut().unwrap().step();
+        assert!(
+            !app.game
+                .as_mut()
+                .unwrap()
+                .drain_events()
+                .any(|event| { matches!(event, crate::game::GameEvent::Rotated { .. }) })
+        );
     }
 
     #[test]

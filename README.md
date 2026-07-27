@@ -56,10 +56,10 @@ the browser's local storage.
 
 On touch devices, the lower controls provide Left, Soft Drop, Right, Hold,
 both rotations, and Hard Drop. Movement buttons support press-and-hold and
-sliding between directions. Rotations and Hold fire on contact. Hard Drop
-fires only when the finger lifts inside its separated button, so sliding away
-cancels it. Every touch target is at least 48 by 48 CSS pixels, and independent
-contacts allow movement and rotation at the same time.
+sliding between directions. Hold fires on contact. Rotations and Hard Drop fire
+only when the finger lifts inside their button, so sliding away cancels them.
+Every touch target is at least 48 by 48 CSS pixels, and independent contacts
+allow movement and rotation at the same time.
 
 The mouse is used only for menus and overlay buttons. Losing focus, hiding the
 browser tab, or rotating a touch device automatically pauses the game and

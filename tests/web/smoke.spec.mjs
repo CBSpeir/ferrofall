@@ -138,9 +138,18 @@ test.describe("mobile touch play", () => {
     }
 
     const client = await context.newCDPSession(page);
+    const clockwise = center(regions.get("rotate-cw"));
+    await dispatchTouches(client, "touchStart", [clockwise]);
+    await expect(canvas).toHaveAttribute("data-touch-active", "rotate-cw");
+    await dispatchTouches(client, "touchMove", [{ x: 180, y: 400 }]);
+    await expect(canvas).toHaveAttribute("data-touch-active", "");
+    await dispatchTouches(client, "touchMove", [clockwise]);
+    await expect(canvas).toHaveAttribute("data-touch-active", "");
+    await dispatchTouches(client, "touchEnd", []);
+
     await dispatchTouches(client, "touchStart", [
       center(regions.get("left")),
-      center(regions.get("rotate-cw")),
+      clockwise,
     ]);
     await expect(canvas).toHaveAttribute(
       "data-touch-active",
