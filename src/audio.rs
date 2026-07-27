@@ -6,6 +6,11 @@ pub(crate) const DEFAULT_VOLUME: f32 = 0.70;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_VOICES: usize = 16;
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn prepare_web_audio() {
+    output::prepare();
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Cue {
     UiActivate,
@@ -622,6 +627,8 @@ mod output {
     extern "C" {
         #[wasm_bindgen(js_namespace = window, js_name = ferrofallAudioAvailable)]
         fn web_audio_available() -> bool;
+        #[wasm_bindgen(js_namespace = window, js_name = ferrofallAudioPrepare)]
+        fn web_audio_prepare();
         #[wasm_bindgen(js_namespace = window, js_name = ferrofallAudioActivate)]
         fn web_audio_activate() -> bool;
         #[wasm_bindgen(js_namespace = window, js_name = ferrofallAudioSetMasterVolume)]
@@ -630,6 +637,10 @@ mod output {
         fn web_audio_play(name: &str, gain_db: f32, rate: f32, pan: f32, delay_seconds: f64);
         #[wasm_bindgen(js_namespace = window, js_name = ferrofallAudioStopAll)]
         fn web_audio_stop_all();
+    }
+
+    pub(super) fn prepare() {
+        web_audio_prepare();
     }
 
     pub(super) struct Output {

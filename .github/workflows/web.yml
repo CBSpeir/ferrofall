@@ -48,6 +48,7 @@ jobs:
             | tar -xz
           sudo install trunk /usr/local/bin/trunk
       - run: trunk build --release
+      - run: python3 tools/check_web_bundle.py dist
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:web

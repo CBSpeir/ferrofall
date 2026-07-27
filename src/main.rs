@@ -70,7 +70,10 @@ fn main() {
 
         if let Some(loading) = document.get_element_by_id(platform::LOADING_ID) {
             match result {
-                Ok(()) => loading.remove(),
+                Ok(()) => {
+                    audio::prepare_web_audio();
+                    loading.remove();
+                }
                 Err(error) => {
                     loading.set_inner_html(
                         "<h1>FERROFALL COULD NOT START</h1>\

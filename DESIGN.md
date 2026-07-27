@@ -20,6 +20,7 @@ The web-primary milestone includes:
 - title, playing, paused, and game-over screens;
 - persistent browser-local best score;
 - a full-viewport web shell with loading and unsupported-device states;
+- responsive portrait and landscape HUDs with multi-touch controls;
 - automated WebAssembly build and Chromium smoke tests;
 - GitHub Pages deployment; and
 - deterministic engine tests and native macOS verification; and
@@ -33,7 +34,7 @@ The milestone excludes:
 - multiplayer;
 - replay files or visible random seeds;
 - installers and signing;
-- mobile or touch controls;
+- gamepad input, haptics, or touch-control customization;
 - iframe embedding;
 - accounts, leaderboards, analytics, cookies, or remote telemetry; and
 - service-worker caching, offline support, or PWA installation.
@@ -56,17 +57,20 @@ The dependency surface is intentionally small:
 
 Native builds use the wgpu renderer and platform accessibility support. Web
 builds use Glow with WebGL, including a WebGL 1 fallback, to support current
-desktop Chrome, Edge, Firefox, and Safari without requiring WebGPU.
+desktop Chrome, Edge, Firefox, and Safari plus current iOS Safari and Android
+Chrome without requiring WebGPU. Other mobile browsers are best effort and are
+never intentionally blocked by user-agent detection.
 
 The source is divided by responsibility:
 
 - `main.rs` configures the native window and generated icon;
 - `main.rs` also starts `eframe::WebRunner` in browser builds;
-- `app.rs` owns screens, focus, wall-clock accumulation, and key mapping;
+- `app.rs` owns screens, lifecycle, wall-clock accumulation, keyboard mapping,
+  and independent touch-contact state;
 - `audio.rs` owns event-to-cue mapping, mixing, and the platform playback
   boundary;
-- `platform.rs` isolates browser storage, support checks, accessible status,
-  and fullscreen behavior;
+- `platform.rs` isolates browser storage, input capability and viewport checks,
+  accessible status, test metadata, and fullscreen behavior;
 - `ui.rs` owns layout, painting, overlays, and visual effects;
 - `game/mod.rs` owns simulation and the command/event API;
 - `game/board.rs` owns locked cells, collision, and row compaction;
@@ -278,18 +282,38 @@ The app has four top-level game screens:
 - game over, with final score, session best, Restart, and Main Menu.
 
 The native secondary title action is Quit. The web secondary title action is
-Fullscreen. The browser's Escape behavior may exit fullscreen before a later
-Escape pauses the game.
+Fullscreen when the browser exposes that capability. Fullscreen is optional;
+normal browser-viewport play is the baseline. The browser's Escape behavior
+may exit fullscreen before a later Escape pauses the game.
 
 Escape pauses and resumes. `R` restarts only while paused or after game over.
 The mouse affects menus and overlay buttons only.
 
+Touch gameplay uses seven labeled controls with targets of at least 48 by 48
+CSS pixels. Left, Soft Drop, and Right form a slideable movement row. Hold is
+isolated above that row. Counterclockwise and clockwise rotation sit together,
+and Hard Drop is a larger separated action. Independent contacts allow a held
+movement action and a rotation at the same time.
+
+Movement controls emit normal engine press and release commands, preserving
+delayed auto-shift and repeat timing. Sliding between movement buttons releases
+the previous action and presses the new one. Hold and rotations fire on touch
+start. Hard Drop arms on touch start, fires only on touch end inside its
+button, and permanently disarms for that contact when the finger slides away.
+Touch cancellation releases every action without firing Hard Drop.
+
 Losing window focus pauses immediately, freezes all simulation timers, and
-clears held-key state. Returning focus does not resume automatically.
+clears held keyboard and touch state. Returning focus does not resume
+automatically.
 
 Hiding the browser tab follows the same rule. Reloading, closing, or navigating
 away abandons the current run without a confirmation prompt. In-progress game
 state is never serialized.
+
+Changing between portrait and landscape on a touch device pauses and clears
+input before reflowing the HUD. The player must explicitly resume. Ordinary
+viewport-height changes caused by expanding or collapsing browser chrome do
+not pause play.
 
 The web build stores its best score in same-origin `localStorage`. It uses a
 versioned key, tolerates unavailable or malformed storage, and has no account
@@ -299,7 +323,8 @@ eframe storage. No game state is persisted.
 
 The web shell keeps a visually hidden semantic status synchronized with the
 canvas screen so assistive technology and browser smoke tests can identify the
-current high-level state.
+current high-level state. Touch controls publish labeled egui button semantics.
+The real-time canvas game does not claim complete screen-reader playability.
 
 ## Audio system
 
@@ -341,11 +366,12 @@ Focus loss, page hiding, and unsupported viewport transitions stop sounds
 without playing a pause cue; returning focus never resumes either gameplay or
 audio automatically.
 
-Native playback uses Kira with predecoded static sounds. The web shell
-prefetches the same files and uses Web Audio, unlocking its context on the
-first pointer or keyboard gesture. Initialization, decoding, device, and
-playback errors are nonfatal: the game continues silently and disables the
-sound control when the platform reports audio as unavailable.
+Native playback uses Kira with predecoded static sounds. The web shell begins
+fetching the same files only after the app is interactive, then uses Web Audio
+and unlocks its context on the first pointer or keyboard gesture. Audio never
+blocks the title screen. Initialization, decoding, device, and playback errors
+are nonfatal: the game continues silently and disables the sound control when
+the platform reports audio as unavailable.
 
 The non-default `audio-lab` Cargo feature replaces the game UI with a
 development soundboard. It previews every cue, rate and pan variations, and
@@ -355,14 +381,16 @@ representative compound events. Release builds do not enable this feature.
 
 The native window opens at 960 by 720 logical points and has a 720 by 560
 minimum. It is resizable, but size and position are not persisted. The web
-canvas fills the browser viewport.
+canvas fills the browser viewport inside CSS safe-area insets.
 
 The website is a top-level, full-viewport application with no surrounding site
-navigation. It is not designed for iframe embedding. A web viewport smaller
-than 720 by 560 shows a branded resize prompt and pauses active gameplay.
-Touch-only devices show a desktop-and-keyboard requirement instead of the game.
-Normal layout resumes when the viewport again meets the requirement, but the
-user must explicitly resume a game that was paused by resizing.
+navigation. It is not designed for iframe embedding. The official mobile
+target is a current iOS Safari or Android Chrome browser on a 360-by-640 CSS
+pixel phone or larger. After browser chrome and safe-area insets, the canvas
+must provide at least 320 by 500 logical pixels in portrait or 500 by 320 in
+landscape. A smaller safe canvas shows a branded resize-or-rotate prompt and
+pauses active gameplay. Normal layout returns when the viewport fits, but the
+player must explicitly resume.
 
 The primary layout uses:
 
@@ -370,6 +398,18 @@ The primary layout uses:
 - a strongly framed 10-by-20 board in the center;
 - five Next previews in the right rail; and
 - compact control hints below the board.
+
+A non-touch viewport of at least 720 by 560 uses the primary desktop layout.
+Narrower keyboard viewports use the compact layout without touch controls.
+Touch-primary devices use a compact layout at every size so controls remain
+stable when a tablet has ample space.
+
+Compact portrait keeps Hold and statistics left of the board, all five Next
+previews right of it, and two thumb-control clusters below it. Compact
+landscape keeps the board centered, merges Hold and statistics into the left
+control zone, and merges the five Next previews into the right control zone.
+Movement stays left and rotation plus Hard Drop stays right in both
+orientations. Paused and game-over overlays hide all gameplay controls.
 
 The board always preserves square cells. The complete layout remains centered
 as the window grows.
@@ -385,6 +425,7 @@ web shell ships a matching SVG favicon.
 Accessibility requirements include:
 
 - full gameplay keyboard control;
+- labeled touch controls with targets of at least 48 by 48 CSS pixels;
 - strong text contrast;
 - scalable logical-point layout;
 - a ghost distinguished by both outline and opacity;
@@ -392,20 +433,32 @@ Accessibility requirements include:
 - sound used only as reinforcement for visible information; and
 - no rapid flashing effects.
 
+The canvas suppresses browser pan and pinch gestures because gameplay requires
+independent multi-touch contacts. The web shell suppresses overscroll and
+respects display cutouts and home-indicator safe areas. Reduced-motion
+preferences disable optional motion without removing essential visible state.
+
 ## Completion bar
 
 The web-primary milestone is complete only when:
 
 - all specified mechanics work;
 - deterministic engine and UI smoke tests pass;
-- default and minimum window layouts are usable;
-- focus, pause, held input, and top-out edges are verified;
+- default, compact portrait, compact landscape, and tablet layouts are usable;
+- focus, pause, orientation, multi-touch, held-input, and top-out edges are
+  verified;
 - the release build runs smoothly on macOS;
-- the release WebAssembly bundle loads in a desktop browser without relevant
-  console errors;
-- title-to-playing interaction and the undersized-viewport gate pass in
-  headless Chromium;
-- current Safari and Firefox receive manual launch checks;
+- the compressed critical web path remains at or below 3 MiB and shows the
+  title within five seconds on a normal 4G connection;
+- the release WebAssembly bundle loads in desktop and mobile-emulated Chromium
+  without relevant console errors;
+- keyboard and touch title-to-playing interactions, orientation pause,
+  simultaneous contacts, responsive snapshots, and the undersized-viewport
+  gate pass in headless Chromium;
+- current desktop Safari and Firefox receive manual launch checks;
+- one physical iPhone and one physical Android phone pass portrait, landscape,
+  multi-touch, held release, orientation, audio, safe-area, browser-chrome,
+  and background-resume checks;
 - audio latency, balance, focus behavior, and preference persistence receive
   manual checks on the web and native macOS;
 - generated audio files match `tools/generate_audio.py --check`;

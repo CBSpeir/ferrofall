@@ -48,6 +48,99 @@ pub(crate) enum UiAction {
     SetAudioVolume(f32),
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) enum TouchControlAction {
+    Left,
+    SoftDrop,
+    Right,
+    Hold,
+    RotateCounterclockwise,
+    RotateClockwise,
+    HardDrop,
+}
+
+impl TouchControlAction {
+    const ALL: [Self; 7] = [
+        Self::Left,
+        Self::SoftDrop,
+        Self::Right,
+        Self::Hold,
+        Self::RotateCounterclockwise,
+        Self::RotateClockwise,
+        Self::HardDrop,
+    ];
+
+    pub(crate) const fn is_held(self) -> bool {
+        matches!(self, Self::Left | Self::SoftDrop | Self::Right)
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Left => "LEFT",
+            Self::SoftDrop => "SOFT",
+            Self::Right => "RIGHT",
+            Self::Hold => "HOLD",
+            Self::RotateCounterclockwise => "ROTATE LEFT",
+            Self::RotateClockwise => "ROTATE RIGHT",
+            Self::HardDrop => "HARD DROP",
+        }
+    }
+
+    const fn glyph(self) -> &'static str {
+        match self {
+            Self::Left => "◀",
+            Self::SoftDrop => "SOFT",
+            Self::Right => "▶",
+            Self::Hold => "HOLD",
+            Self::RotateCounterclockwise => "CCW",
+            Self::RotateClockwise => "CW",
+            Self::HardDrop => "DROP",
+        }
+    }
+
+    pub(crate) const fn data_label(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::SoftDrop => "soft-drop",
+            Self::Right => "right",
+            Self::Hold => "hold",
+            Self::RotateCounterclockwise => "rotate-ccw",
+            Self::RotateClockwise => "rotate-cw",
+            Self::HardDrop => "hard-drop",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LayoutMode {
+    Desktop,
+    CompactPortrait,
+    CompactLandscape,
+}
+
+impl LayoutMode {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Desktop => "desktop",
+            Self::CompactPortrait => "compact-portrait",
+            Self::CompactLandscape => "compact-landscape",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct UiOutput {
+    pub(crate) action: UiAction,
+    pub(crate) control_click: Option<TouchControlAction>,
+}
+
+impl UiOutput {
+    const NONE: Self = Self {
+        action: UiAction::None,
+        control_click: None,
+    };
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct AudioUiState<'a> {
     pub(crate) volume: f32,
@@ -56,6 +149,16 @@ pub(crate) struct AudioUiState<'a> {
     pub(crate) controls_open: bool,
     pub(crate) notice: Option<&'a str>,
     pub(crate) failure_reason: Option<&'a str>,
+}
+
+pub(crate) struct UiState<'a> {
+    pub(crate) game: Option<&'a Game>,
+    pub(crate) session_best: u64,
+    pub(crate) effects: &'a VisualEffects,
+    pub(crate) now: Instant,
+    pub(crate) audio: AudioUiState<'a>,
+    pub(crate) touch_controls: bool,
+    pub(crate) active_touch_controls: &'a [TouchControlAction],
 }
 
 #[cfg(feature = "audio-lab")]
@@ -127,34 +230,47 @@ impl VisualEffects {
     }
 }
 
-pub(crate) fn show(
-    ui: &mut egui::Ui,
-    screen: Screen,
-    game: Option<&Game>,
-    session_best: u64,
-    effects: &VisualEffects,
-    now: Instant,
-    audio: AudioUiState<'_>,
-) -> UiAction {
+pub(crate) fn show(ui: &mut egui::Ui, screen: Screen, state: UiState<'_>) -> UiOutput {
     let rect = ui.max_rect();
     ui.painter().rect_filled(rect, 0.0, BACKGROUND);
     paint_background_grid(ui.painter(), rect);
 
+    let layout_mode = layout_mode(rect, state.touch_controls);
+
     let action = match screen {
-        Screen::Title => show_title(ui, rect),
+        Screen::Title => show_title(ui, rect, state.touch_controls),
         Screen::Playing | Screen::Paused | Screen::GameOver => {
-            let Some(game) = game else {
-                return UiAction::None;
+            let Some(game) = state.game else {
+                return UiOutput::NONE;
             };
-            show_game(ui, rect, game, session_best, effects, now, screen)
+            show_game(ui, rect, game, screen, layout_mode, &state)
         }
     };
 
-    let audio_action = show_audio_control(ui, rect, screen, audio);
-    if audio_action != UiAction::None {
+    let audio_action = show_audio_control(
+        ui,
+        rect,
+        screen,
+        state.audio,
+        layout_mode,
+        state.touch_controls,
+    );
+    let action = if audio_action != UiAction::None {
         audio_action
     } else {
         action
+    };
+
+    let control_click = if screen == Screen::Playing && state.touch_controls {
+        touch_control_layout(rect, layout_mode)
+            .and_then(|layout| paint_touch_controls(ui, &layout, state.active_touch_controls))
+    } else {
+        None
+    };
+
+    UiOutput {
+        action,
+        control_click,
     }
 }
 
@@ -167,13 +283,9 @@ pub(crate) fn show_browser_support_issue(ui: &mut egui::Ui, issue: BrowserSuppor
     let center = rect.center();
     paint_falling_mark(&painter, pos2(center.x, center.y - 120.0), 18.0);
     let (heading, detail) = match issue {
-        BrowserSupportIssue::TouchOnly => (
-            "DESKTOP REQUIRED",
-            "Ferrofall's first web release requires a keyboard\nand a desktop or laptop browser.",
-        ),
         BrowserSupportIssue::ViewportTooSmall => (
             "MAKE SOME ROOM",
-            "Enlarge this window or reduce browser zoom.\nMinimum playable viewport: 720 × 560.",
+            "Rotate the device or enlarge this window.\nPlayable safe area: 320 × 500 or 500 × 320.",
         ),
     };
     painter.text(
@@ -310,33 +422,72 @@ pub(crate) fn show_audio_lab(
     action
 }
 
-fn show_title(ui: &mut egui::Ui, rect: Rect) -> UiAction {
+fn show_title(ui: &mut egui::Ui, rect: Rect, touch_controls: bool) -> UiAction {
     let painter = ui.painter().clone();
     let center = rect.center();
-    paint_falling_mark(&painter, pos2(center.x, center.y - 154.0), 22.0);
+    let compact = layout_mode(rect, touch_controls) != LayoutMode::Desktop;
+    let mark_y = if compact {
+        rect.top() + rect.height() * 0.19
+    } else {
+        center.y - 154.0
+    };
+    paint_falling_mark(
+        &painter,
+        pos2(center.x, mark_y),
+        if compact { 17.0 } else { 22.0 },
+    );
     painter.text(
-        pos2(center.x, center.y - 55.0),
+        pos2(
+            center.x,
+            if compact {
+                rect.top() + rect.height() * 0.34
+            } else {
+                center.y - 55.0
+            },
+        ),
         Align2::CENTER_CENTER,
         "FERROFALL",
-        display_font(46.0),
+        display_font(if compact { 36.0 } else { 46.0 }),
         TEXT,
     );
 
-    let play_rect = Rect::from_center_size(pos2(center.x, center.y + 28.0), vec2(210.0, 48.0));
-    let secondary_rect = play_rect.translate(vec2(0.0, 62.0));
-    let play = styled_button(ui, play_rect, "PLAY", true);
-    let secondary_label = if cfg!(target_arch = "wasm32") {
-        "FULLSCREEN"
+    let play_y = if compact {
+        rect.top() + rect.height() * 0.53
     } else {
-        "QUIT"
+        center.y + 28.0
     };
-    let secondary = styled_button(ui, secondary_rect, secondary_label, false);
+    let play_rect = Rect::from_center_size(pos2(center.x, play_y), vec2(210.0, 52.0));
+    let secondary_rect = play_rect.translate(vec2(0.0, 64.0));
+    let play = styled_button(ui, play_rect, "PLAY", true);
+    let show_secondary = !cfg!(target_arch = "wasm32") || crate::platform::fullscreen_available();
+    let secondary = show_secondary
+        && styled_button(
+            ui,
+            secondary_rect,
+            if cfg!(target_arch = "wasm32") {
+                "FULLSCREEN"
+            } else {
+                "QUIT"
+            },
+            false,
+        );
 
     painter.text(
-        pos2(center.x, secondary_rect.bottom() + 38.0),
+        pos2(
+            center.x,
+            if show_secondary {
+                secondary_rect.bottom() + if compact { 24.0 } else { 38.0 }
+            } else {
+                play_rect.bottom() + 32.0
+            },
+        ),
         Align2::CENTER_TOP,
-        "ENTER  PLAY    ·    ESC  PAUSE    ·    R  RESTART    ·    M  MUTE",
-        label_font(12.0),
+        if touch_controls {
+            "TWO-THUMB CONTROLS  ·  TAP PAUSE ANY TIME"
+        } else {
+            "ENTER  PLAY    ·    ESC  PAUSE    ·    R  RESTART    ·    M  MUTE"
+        },
+        label_font(if compact { 9.5 } else { 12.0 }),
         MUTED,
     );
 
@@ -357,24 +508,32 @@ fn show_game(
     ui: &mut egui::Ui,
     rect: Rect,
     game: &Game,
-    session_best: u64,
-    effects: &VisualEffects,
-    now: Instant,
     screen: Screen,
+    layout_mode: LayoutMode,
+    state: &UiState<'_>,
 ) -> UiAction {
-    let layout = GameLayout::new(rect);
+    let layout = GameLayout::new(rect, layout_mode);
     let painter = ui.painter().clone();
 
     painter.text(
         layout.header.left_top(),
         Align2::LEFT_TOP,
         "FERROFALL",
-        display_font(28.0),
+        display_font(if layout_mode == LayoutMode::Desktop {
+            28.0
+        } else {
+            21.0
+        }),
         TEXT,
     );
+    let header_button = if layout_mode == LayoutMode::Desktop {
+        vec2(38.0, 34.0)
+    } else {
+        Vec2::splat(48.0)
+    };
     let pause_rect = Rect::from_min_size(
-        pos2(layout.header.right() - 38.0, layout.header.top()),
-        vec2(38.0, 34.0),
+        pos2(layout.header.right() - header_button.x, layout.header.top()),
+        header_button,
     );
     let pause_clicked = if screen == Screen::Playing {
         pause_button(ui, pause_rect)
@@ -382,10 +541,32 @@ fn show_game(
         false
     };
 
-    paint_left_rail(&painter, layout.left, game, session_best);
-    paint_board(&painter, layout.board, game, effects, now);
-    paint_next_rail(&painter, layout.right, game);
-    paint_controls(&painter, layout.footer);
+    match layout_mode {
+        LayoutMode::Desktop => {
+            paint_left_rail(&painter, layout.left, game, state.session_best);
+            paint_next_rail(&painter, layout.right, game);
+            paint_controls(&painter, layout.footer);
+        }
+        LayoutMode::CompactPortrait => {
+            paint_compact_left_rail(&painter, layout.left, game, state.session_best);
+            paint_compact_next_rail(&painter, layout.right, game, false);
+        }
+        LayoutMode::CompactLandscape => {
+            let controls = state
+                .touch_controls
+                .then(|| touch_control_layout(rect, layout_mode))
+                .flatten();
+            let left_info = controls
+                .as_ref()
+                .map_or(layout.left, |controls| controls.info_rect(layout.left));
+            let right_info = controls
+                .as_ref()
+                .map_or(layout.right, |controls| controls.info_rect(layout.right));
+            paint_landscape_left_rail(&painter, left_info, game, state.session_best);
+            paint_compact_next_rail(&painter, right_info, game, true);
+        }
+    }
+    paint_board(&painter, layout.board, game, state.effects, state.now);
 
     if pause_clicked {
         return UiAction::Pause;
@@ -398,7 +579,7 @@ fn show_game(
             rect,
             Overlay::GameOver {
                 score: game.score(),
-                best: session_best,
+                best: state.session_best,
             },
         ),
         Screen::Title | Screen::Playing => UiAction::None,
@@ -495,6 +676,168 @@ fn paint_left_rail(painter: &Painter, rect: Rect, game: &Game, session_best: u64
     }
 }
 
+fn paint_compact_left_rail(painter: &Painter, rect: Rect, game: &Game, session_best: u64) {
+    let label_size = (rect.width() * 0.145).clamp(8.0, 11.0);
+    let value_size = (rect.width() * 0.24).clamp(12.0, 18.0);
+    painter.text(
+        rect.left_top(),
+        Align2::LEFT_TOP,
+        "HOLD",
+        label_font(label_size),
+        MUTED,
+    );
+    let hold_height = (rect.width() * 0.92)
+        .clamp(48.0, 82.0)
+        .min(rect.height() * 0.23);
+    let hold_rect = Rect::from_min_size(
+        pos2(rect.left(), rect.top() + label_size + 8.0),
+        vec2(rect.width(), hold_height),
+    );
+    painter.rect_filled(hold_rect, 2.0, SURFACE_DEEP);
+    painter.rect_stroke(hold_rect, 2.0, Stroke::new(1.0, BORDER), StrokeKind::Inside);
+    if let Some(kind) = game.held_piece() {
+        paint_preview_piece(
+            painter,
+            kind,
+            hold_rect.center(),
+            (hold_rect.width() / 5.2).min(hold_rect.height() / 4.2),
+            if game.hold_available() { 255 } else { 105 },
+        );
+    }
+
+    let stats = [
+        ("SCORE", format_number(game.score())),
+        ("BEST", format_number(session_best.max(game.score()))),
+        ("LEVEL", game.level().to_string()),
+        ("LINES", game.lines().to_string()),
+    ];
+    let stats_top = hold_rect.bottom() + 10.0;
+    let status_height = if game.combo().is_some_and(|combo| combo > 0) || game.back_to_back() {
+        28.0
+    } else {
+        0.0
+    };
+    let stat_height = ((rect.bottom() - stats_top - status_height) / 4.0).max(31.0);
+    for (index, (label, value)) in stats.into_iter().enumerate() {
+        let top = stats_top + index as f32 * stat_height;
+        painter.text(
+            pos2(rect.left(), top),
+            Align2::LEFT_TOP,
+            label,
+            label_font(label_size),
+            MUTED,
+        );
+        painter.text(
+            pos2(rect.left(), top + label_size + 4.0),
+            Align2::LEFT_TOP,
+            value,
+            number_font(value_size),
+            TEXT,
+        );
+    }
+
+    let mut status_y = rect.bottom();
+    if game.back_to_back() {
+        painter.text(
+            pos2(rect.left(), status_y),
+            Align2::LEFT_BOTTOM,
+            "B2B",
+            label_font(label_size),
+            AMBER,
+        );
+        status_y -= label_size + 4.0;
+    }
+    if let Some(combo) = game.combo().filter(|combo| *combo > 0) {
+        painter.text(
+            pos2(rect.left(), status_y),
+            Align2::LEFT_BOTTOM,
+            format!("COMBO ×{combo}"),
+            label_font(label_size),
+            AMBER,
+        );
+    }
+}
+
+fn paint_landscape_left_rail(painter: &Painter, rect: Rect, game: &Game, session_best: u64) {
+    let label_size = 9.0;
+    painter.text(
+        rect.left_top(),
+        Align2::LEFT_TOP,
+        "HOLD",
+        label_font(label_size),
+        MUTED,
+    );
+    let hold_rect = Rect::from_min_size(
+        pos2(rect.left(), rect.top() + 16.0),
+        vec2((rect.width() * 0.36).clamp(58.0, 76.0), 56.0),
+    );
+    painter.rect_filled(hold_rect, 2.0, SURFACE_DEEP);
+    painter.rect_stroke(hold_rect, 2.0, Stroke::new(1.0, BORDER), StrokeKind::Inside);
+    if let Some(kind) = game.held_piece() {
+        paint_preview_piece(
+            painter,
+            kind,
+            hold_rect.center(),
+            (hold_rect.width() / 5.2).min(13.0),
+            if game.hold_available() { 255 } else { 105 },
+        );
+    }
+
+    let right_x = hold_rect.right() + 10.0;
+    paint_landscape_stat(
+        painter,
+        pos2(right_x, rect.top()),
+        "SCORE",
+        format_number(game.score()),
+    );
+    paint_landscape_stat(
+        painter,
+        pos2(right_x, rect.top() + 39.0),
+        "BEST",
+        format_number(session_best.max(game.score())),
+    );
+    paint_landscape_stat(
+        painter,
+        pos2(rect.left(), hold_rect.bottom() + 10.0),
+        "LEVEL",
+        game.level().to_string(),
+    );
+    paint_landscape_stat(
+        painter,
+        pos2(rect.left() + rect.width() * 0.36, hold_rect.bottom() + 10.0),
+        "LINES",
+        game.lines().to_string(),
+    );
+
+    let mut status = Vec::new();
+    if let Some(combo) = game.combo().filter(|combo| *combo > 0) {
+        status.push(format!("COMBO ×{combo}"));
+    }
+    if game.back_to_back() {
+        status.push("BACK-TO-BACK".to_owned());
+    }
+    if !status.is_empty() {
+        painter.text(
+            rect.left_bottom(),
+            Align2::LEFT_BOTTOM,
+            status.join("  ·  "),
+            label_font(9.0),
+            AMBER,
+        );
+    }
+}
+
+fn paint_landscape_stat(painter: &Painter, pos: Pos2, label: &str, value: String) {
+    painter.text(pos, Align2::LEFT_TOP, label, label_font(8.5), MUTED);
+    painter.text(
+        pos2(pos.x, pos.y + 13.0),
+        Align2::LEFT_TOP,
+        value,
+        number_font(15.0),
+        TEXT,
+    );
+}
+
 fn paint_stat(painter: &Painter, rect: Rect, y: f32, label: &str, value: String) -> f32 {
     painter.text(
         pos2(rect.left(), y),
@@ -547,6 +890,49 @@ fn paint_next_rail(painter: &Painter, rect: Rect, game: &Game) {
             kind,
             slot.center(),
             (slot.height() / 5.0).min(slot.width() / 5.5),
+            255,
+        );
+    }
+}
+
+fn paint_compact_next_rail(painter: &Painter, rect: Rect, game: &Game, horizontal: bool) {
+    let label_size = if horizontal { 9.0 } else { 10.0 };
+    painter.text(
+        rect.left_top(),
+        Align2::LEFT_TOP,
+        "NEXT",
+        label_font(label_size),
+        MUTED,
+    );
+    let content = Rect::from_min_max(
+        pos2(rect.left(), rect.top() + label_size + 8.0),
+        rect.right_bottom(),
+    );
+    let gap = if horizontal { 3.0 } else { 5.0 };
+    for (index, kind) in game.next_pieces().enumerate() {
+        let slot = if horizontal {
+            let width = (content.width() - gap * 4.0) / 5.0;
+            Rect::from_min_size(
+                pos2(content.left() + index as f32 * (width + gap), content.top()),
+                vec2(width, content.height().min(62.0)),
+            )
+        } else {
+            let height = (content.height() - gap * 4.0) / 5.0;
+            Rect::from_min_size(
+                pos2(
+                    content.left(),
+                    content.top() + index as f32 * (height + gap),
+                ),
+                vec2(content.width(), height),
+            )
+        };
+        painter.rect_filled(slot, 2.0, SURFACE_DEEP);
+        painter.rect_stroke(slot, 2.0, Stroke::new(1.0, GRID), StrokeKind::Inside);
+        paint_preview_piece(
+            painter,
+            kind,
+            slot.center(),
+            (slot.width() / 5.3).min(slot.height() / 4.4),
             255,
         );
     }
@@ -782,20 +1168,323 @@ fn paint_controls(painter: &Painter, rect: Rect) {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct TouchControl {
+    action: TouchControlAction,
+    rect: Rect,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct TouchControlLayout {
+    controls: Vec<TouchControl>,
+    controls_top: f32,
+}
+
+impl TouchControlLayout {
+    pub(crate) fn action_at(&self, pos: Pos2) -> Option<TouchControlAction> {
+        self.controls
+            .iter()
+            .find(|control| control.rect.contains(pos))
+            .map(|control| control.action)
+    }
+
+    pub(crate) fn held_action_at(&self, pos: Pos2) -> Option<TouchControlAction> {
+        self.action_at(pos).filter(|action| action.is_held())
+    }
+
+    pub(crate) fn contains(&self, action: TouchControlAction, pos: Pos2) -> bool {
+        self.controls
+            .iter()
+            .any(|control| control.action == action && control.rect.contains(pos))
+    }
+
+    pub(crate) fn metadata(&self) -> String {
+        self.controls
+            .iter()
+            .map(|control| {
+                format!(
+                    "{}:{:.1},{:.1},{:.1},{:.1}",
+                    control.action.data_label(),
+                    control.rect.left(),
+                    control.rect.top(),
+                    control.rect.width(),
+                    control.rect.height(),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(";")
+    }
+
+    fn info_rect(&self, side: Rect) -> Rect {
+        Rect::from_min_max(
+            side.left_top(),
+            pos2(side.right(), (self.controls_top - 8.0).max(side.top())),
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn rect_for(&self, action: TouchControlAction) -> Rect {
+        self.controls
+            .iter()
+            .find(|control| control.action == action)
+            .map(|control| control.rect)
+            .expect("touch control layout must contain every action")
+    }
+}
+
+pub(crate) fn touch_control_layout(rect: Rect, mode: LayoutMode) -> Option<TouchControlLayout> {
+    match mode {
+        LayoutMode::Desktop => None,
+        LayoutMode::CompactPortrait => portrait_touch_controls(rect),
+        LayoutMode::CompactLandscape => landscape_touch_controls(rect),
+    }
+}
+
+fn portrait_touch_controls(rect: Rect) -> Option<TouchControlLayout> {
+    let layout = GameLayout::new(rect, LayoutMode::CompactPortrait);
+    let area = layout.footer;
+    let gap = 5.0;
+    let target = ((area.height() - gap) / 2.0)
+        .min((area.width() - gap * 3.0 - 16.0) / 5.0)
+        .clamp(48.0, 68.0);
+    let movement_width = target * 3.0 + gap * 2.0;
+    let action_width = target * 2.0 + gap;
+    if area.height() < target * 2.0 + gap || area.width() < movement_width + action_width + 16.0 {
+        return None;
+    }
+
+    let top = area.center().y - (target * 2.0 + gap) / 2.0;
+    let movement_left = area.left();
+    let movement_top = top + target + gap;
+    let action_left = area.right() - action_width;
+    let mut controls = Vec::with_capacity(TouchControlAction::ALL.len());
+    controls.push(TouchControl {
+        action: TouchControlAction::Hold,
+        rect: Rect::from_min_size(
+            pos2(movement_left + (movement_width - target) / 2.0, top),
+            Vec2::splat(target),
+        ),
+    });
+    for (index, action) in [
+        TouchControlAction::Left,
+        TouchControlAction::SoftDrop,
+        TouchControlAction::Right,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        controls.push(TouchControl {
+            action,
+            rect: Rect::from_min_size(
+                pos2(movement_left + index as f32 * (target + gap), movement_top),
+                Vec2::splat(target),
+            ),
+        });
+    }
+    for (index, action) in [
+        TouchControlAction::RotateCounterclockwise,
+        TouchControlAction::RotateClockwise,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        controls.push(TouchControl {
+            action,
+            rect: Rect::from_min_size(
+                pos2(action_left + index as f32 * (target + gap), top),
+                Vec2::splat(target),
+            ),
+        });
+    }
+    controls.push(TouchControl {
+        action: TouchControlAction::HardDrop,
+        rect: Rect::from_center_size(
+            pos2(
+                action_left + action_width / 2.0,
+                movement_top + target / 2.0,
+            ),
+            vec2((target * 1.45).min(action_width), target),
+        ),
+    });
+
+    Some(TouchControlLayout {
+        controls,
+        controls_top: top,
+    })
+}
+
+fn landscape_touch_controls(rect: Rect) -> Option<TouchControlLayout> {
+    let layout = GameLayout::new(rect, LayoutMode::CompactLandscape);
+    let gap = 5.0;
+    let target = ((layout.left.width() - gap * 2.0) / 3.0).clamp(48.0, 58.0);
+    let movement_width = target * 3.0 + gap * 2.0;
+    let action_width = target * 2.0 + gap;
+    if layout.left.width() < movement_width
+        || layout.right.width() < action_width
+        || layout.left.height() < target * 2.0 + gap + 70.0
+    {
+        return None;
+    }
+
+    let movement_left = layout.left.center().x - movement_width / 2.0;
+    let movement_top = layout.left.bottom() - target;
+    let upper_top = movement_top - target - gap;
+    let action_left = layout.right.center().x - action_width / 2.0;
+    let mut controls = Vec::with_capacity(TouchControlAction::ALL.len());
+    controls.push(TouchControl {
+        action: TouchControlAction::Hold,
+        rect: Rect::from_min_size(
+            pos2(movement_left + (movement_width - target) / 2.0, upper_top),
+            Vec2::splat(target),
+        ),
+    });
+    for (index, action) in [
+        TouchControlAction::Left,
+        TouchControlAction::SoftDrop,
+        TouchControlAction::Right,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        controls.push(TouchControl {
+            action,
+            rect: Rect::from_min_size(
+                pos2(movement_left + index as f32 * (target + gap), movement_top),
+                Vec2::splat(target),
+            ),
+        });
+    }
+    for (index, action) in [
+        TouchControlAction::RotateCounterclockwise,
+        TouchControlAction::RotateClockwise,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        controls.push(TouchControl {
+            action,
+            rect: Rect::from_min_size(
+                pos2(action_left + index as f32 * (target + gap), upper_top),
+                Vec2::splat(target),
+            ),
+        });
+    }
+    controls.push(TouchControl {
+        action: TouchControlAction::HardDrop,
+        rect: Rect::from_center_size(
+            pos2(
+                action_left + action_width / 2.0,
+                movement_top + target / 2.0,
+            ),
+            vec2((target * 1.45).min(action_width), target),
+        ),
+    });
+
+    Some(TouchControlLayout {
+        controls,
+        controls_top: upper_top,
+    })
+}
+
+fn paint_touch_controls(
+    ui: &mut egui::Ui,
+    layout: &TouchControlLayout,
+    active: &[TouchControlAction],
+) -> Option<TouchControlAction> {
+    let mut clicked = None;
+    for control in &layout.controls {
+        let response = ui.interact(
+            control.rect,
+            ui.make_persistent_id(("touch_control", control.action)),
+            egui::Sense::click(),
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                ui.is_enabled(),
+                control.action.label(),
+            )
+        });
+        let is_active = active.contains(&control.action) || response.is_pointer_button_down_on();
+        let fill = if is_active {
+            if control.action == TouchControlAction::HardDrop {
+                Color32::from_rgb(229, 170, 62)
+            } else {
+                Color32::from_rgb(31, 51, 63)
+            }
+        } else {
+            SURFACE_DEEP
+        };
+        let stroke = if control.action == TouchControlAction::HardDrop {
+            AMBER
+        } else if is_active {
+            TEXT
+        } else {
+            BORDER
+        };
+        ui.painter().rect_filled(control.rect, 7.0, fill);
+        ui.painter().rect_stroke(
+            control.rect,
+            7.0,
+            Stroke::new(if is_active { 1.8 } else { 1.1 }, stroke),
+            StrokeKind::Inside,
+        );
+        ui.painter().text(
+            control.rect.center(),
+            Align2::CENTER_CENTER,
+            control.action.glyph(),
+            if matches!(
+                control.action,
+                TouchControlAction::Hold
+                    | TouchControlAction::SoftDrop
+                    | TouchControlAction::RotateCounterclockwise
+                    | TouchControlAction::RotateClockwise
+                    | TouchControlAction::HardDrop
+            ) {
+                label_font((control.rect.height() * 0.20).clamp(10.0, 13.0))
+            } else {
+                display_font((control.rect.height() * 0.38).clamp(18.0, 25.0))
+            },
+            if is_active && control.action == TouchControlAction::HardDrop {
+                BACKGROUND
+            } else {
+                TEXT
+            },
+        );
+        if response.clicked() {
+            clicked = Some(control.action);
+        }
+    }
+    clicked
+}
+
 fn show_audio_control(
     ui: &mut egui::Ui,
     rect: Rect,
     screen: Screen,
     audio: AudioUiState<'_>,
+    layout_mode: LayoutMode,
+    touch_controls: bool,
 ) -> UiAction {
     let button_rect = match screen {
-        Screen::Title => Rect::from_min_size(
-            pos2(rect.right() - 62.0, rect.top() + 24.0),
-            vec2(38.0, 34.0),
-        ),
+        Screen::Title => {
+            let size = if touch_controls {
+                Vec2::splat(48.0)
+            } else {
+                vec2(38.0, 34.0)
+            };
+            Rect::from_min_size(pos2(rect.right() - size.x - 16.0, rect.top() + 16.0), size)
+        }
         Screen::Playing | Screen::Paused | Screen::GameOver => {
-            let header = GameLayout::new(rect).header;
-            Rect::from_min_size(pos2(header.right() - 84.0, header.top()), vec2(38.0, 34.0))
+            let header = GameLayout::new(rect, layout_mode).header;
+            if layout_mode == LayoutMode::Desktop {
+                Rect::from_min_size(pos2(header.right() - 84.0, header.top()), vec2(38.0, 34.0))
+            } else {
+                Rect::from_min_size(
+                    pos2(header.right() - 102.0, header.top()),
+                    Vec2::splat(48.0),
+                )
+            }
         }
     };
     let response = ui
@@ -876,9 +1565,12 @@ fn show_audio_control(
         return UiAction::None;
     }
 
+    let panel_width = 270.0_f32.min(rect.width() - 16.0);
+    let panel_left = (button_rect.right() - panel_width)
+        .clamp(rect.left() + 8.0, rect.right() - panel_width - 8.0);
     let panel = Rect::from_min_size(
-        pos2(button_rect.right() - 270.0, button_rect.bottom() + 8.0),
-        vec2(270.0, 100.0),
+        pos2(panel_left, button_rect.bottom() + 8.0),
+        vec2(panel_width, 100.0),
     );
     ui.painter().rect_filled(panel, 3.0, SURFACE);
     ui.painter()
@@ -1003,7 +1695,13 @@ fn paint_overlay(ui: &mut egui::Ui, rect: Rect, overlay: Overlay) -> UiAction {
     ui.painter()
         .rect_filled(rect, 0.0, Color32::from_black_alpha(205));
     let center = rect.center();
-    let panel = Rect::from_center_size(center, vec2(360.0, 330.0));
+    let panel = Rect::from_center_size(
+        center,
+        vec2(
+            360.0_f32.min(rect.width() - 16.0),
+            330.0_f32.min(rect.height() - 16.0),
+        ),
+    );
     ui.painter().rect_filled(panel, 3.0, SURFACE);
     ui.painter()
         .rect_stroke(panel, 3.0, Stroke::new(1.0, BORDER), StrokeKind::Inside);
@@ -1048,9 +1746,18 @@ fn paint_overlay(ui: &mut egui::Ui, rect: Rect, overlay: Overlay) -> UiAction {
         );
     }
 
-    let first_rect = Rect::from_center_size(pos2(center.x, panel.top() + 164.0), vec2(210.0, 45.0));
-    let second_rect = first_rect.translate(vec2(0.0, 58.0));
-    let third_rect = second_rect.translate(vec2(0.0, 58.0));
+    let button_height = 48.0;
+    let button_gap = 10.0;
+    let button_count = if has_third { 3.0 } else { 2.0 };
+    let buttons_height = button_count * button_height + (button_count - 1.0) * button_gap;
+    let first_top = panel.bottom() - 18.0 - buttons_height;
+    let button_width = 210.0_f32.min(panel.width() - 32.0);
+    let first_rect = Rect::from_min_size(
+        pos2(center.x - button_width / 2.0, first_top),
+        vec2(button_width, button_height),
+    );
+    let second_rect = first_rect.translate(vec2(0.0, button_height + button_gap));
+    let third_rect = second_rect.translate(vec2(0.0, button_height + button_gap));
 
     if styled_button(ui, first_rect, first_label, true) {
         first_action
@@ -1158,8 +1865,26 @@ struct GameLayout {
     footer: Rect,
 }
 
+pub(crate) fn layout_mode(rect: Rect, touch_controls: bool) -> LayoutMode {
+    if !touch_controls && rect.width() >= 720.0 && rect.height() >= 560.0 {
+        LayoutMode::Desktop
+    } else if rect.height() >= rect.width() {
+        LayoutMode::CompactPortrait
+    } else {
+        LayoutMode::CompactLandscape
+    }
+}
+
 impl GameLayout {
-    fn new(rect: Rect) -> Self {
+    fn new(rect: Rect, mode: LayoutMode) -> Self {
+        match mode {
+            LayoutMode::Desktop => Self::desktop(rect),
+            LayoutMode::CompactPortrait => Self::compact_portrait(rect),
+            LayoutMode::CompactLandscape => Self::compact_landscape(rect),
+        }
+    }
+
+    fn desktop(rect: Rect) -> Self {
         let margin = 24.0_f32.min(rect.width() * 0.03);
         let inner = rect.shrink(margin);
         let header_height = 54.0;
@@ -1204,6 +1929,85 @@ impl GameLayout {
             ),
         }
     }
+
+    fn compact_portrait(rect: Rect) -> Self {
+        let margin = (rect.width() * 0.02).clamp(6.0, 14.0);
+        let inner = rect.shrink2(vec2(margin, 6.0));
+        let header_height = 48.0;
+        let header_gap = 6.0;
+        let controls_height = (inner.height() * 0.25).clamp(112.0, 154.0);
+        let controls_gap = 6.0;
+        let content_top = inner.top() + header_height + header_gap;
+        let content_bottom = inner.bottom() - controls_height - controls_gap;
+        let available_height = (content_bottom - content_top).max(250.0);
+        let rail_min = if inner.width() >= 500.0 { 96.0 } else { 62.0 };
+        let horizontal_gap = (inner.width() * 0.018).clamp(5.0, 14.0);
+        let max_board_width = (inner.width() - rail_min * 2.0 - horizontal_gap * 2.0).max(125.0);
+        let board_width = (available_height / 2.0).min(max_board_width);
+        let board_height = board_width * 2.0;
+        let rail_width = ((inner.width() - board_width - horizontal_gap * 2.0) / 2.0).max(rail_min);
+        let total_width = board_width + rail_width * 2.0 + horizontal_gap * 2.0;
+        let left_x = inner.center().x - total_width / 2.0;
+        let board_top = content_top + (available_height - board_height) / 2.0;
+        let left = Rect::from_min_size(pos2(left_x, board_top), vec2(rail_width, board_height));
+        let board = Rect::from_min_size(
+            pos2(left.right() + horizontal_gap, board_top),
+            vec2(board_width, board_height),
+        );
+        let right = Rect::from_min_size(
+            pos2(board.right() + horizontal_gap, board_top),
+            vec2(rail_width, board_height),
+        );
+
+        Self {
+            header: Rect::from_min_max(
+                inner.left_top(),
+                pos2(inner.right(), inner.top() + header_height),
+            ),
+            left,
+            board,
+            right,
+            footer: Rect::from_min_max(
+                pos2(inner.left(), inner.bottom() - controls_height),
+                inner.right_bottom(),
+            ),
+        }
+    }
+
+    fn compact_landscape(rect: Rect) -> Self {
+        let margin = (rect.height() * 0.02).clamp(6.0, 10.0);
+        let inner = rect.shrink(margin);
+        let header_height = 48.0;
+        let content_top = inner.top() + header_height + 4.0;
+        let content_height = (inner.bottom() - content_top).max(250.0);
+        let board_height = content_height;
+        let board_width = board_height / 2.0;
+        let horizontal_gap = (inner.width() * 0.012).clamp(5.0, 10.0);
+        let side_width = (inner.width() - board_width - horizontal_gap * 2.0) / 2.0;
+        let left = Rect::from_min_size(
+            pos2(inner.left(), content_top),
+            vec2(side_width, board_height),
+        );
+        let board = Rect::from_min_size(
+            pos2(left.right() + horizontal_gap, content_top),
+            vec2(board_width, board_height),
+        );
+        let right = Rect::from_min_size(
+            pos2(board.right() + horizontal_gap, content_top),
+            vec2(side_width, board_height),
+        );
+
+        Self {
+            header: Rect::from_min_max(
+                inner.left_top(),
+                pos2(inner.right(), inner.top() + header_height),
+            ),
+            left,
+            board,
+            right,
+            footer: Rect::NOTHING,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1212,7 +2016,10 @@ mod tests {
 
     #[test]
     fn layout_preserves_square_cells_at_minimum_window_size() {
-        let layout = GameLayout::new(Rect::from_min_size(Pos2::ZERO, vec2(720.0, 560.0)));
+        let layout = GameLayout::new(
+            Rect::from_min_size(Pos2::ZERO, vec2(720.0, 560.0)),
+            LayoutMode::Desktop,
+        );
         assert!((layout.board.height() / layout.board.width() - 2.0).abs() < 0.0001);
         assert!(layout.left.width() >= 142.0);
         assert!(layout.right.right() <= 720.0);
@@ -1230,17 +2037,21 @@ mod tests {
                 show(
                     ui,
                     Screen::Title,
-                    None,
-                    0,
-                    &VisualEffects::default(),
-                    Instant::now(),
-                    AudioUiState {
-                        volume: 0.7,
-                        muted: false,
-                        available: true,
-                        controls_open: false,
-                        notice: None,
-                        failure_reason: None,
+                    UiState {
+                        game: None,
+                        session_best: 0,
+                        effects: &VisualEffects::default(),
+                        now: Instant::now(),
+                        audio: AudioUiState {
+                            volume: 0.7,
+                            muted: false,
+                            available: true,
+                            controls_open: false,
+                            notice: None,
+                            failure_reason: None,
+                        },
+                        touch_controls: false,
+                        active_touch_controls: &[],
                     },
                 );
             },
@@ -1259,5 +2070,40 @@ mod tests {
             |ui| show_browser_support_issue(ui, BrowserSupportIssue::ViewportTooSmall),
         );
         assert!(!output.shapes.is_empty());
+    }
+
+    #[test]
+    fn portrait_touch_controls_preserve_minimum_target_size() {
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(320.0, 500.0));
+        let layout = touch_control_layout(rect, LayoutMode::CompactPortrait).unwrap();
+        for action in TouchControlAction::ALL {
+            let target = layout.rect_for(action);
+            assert!(target.width() >= 48.0);
+            assert!(target.height() >= 48.0);
+            assert!(rect.contains_rect(target));
+        }
+    }
+
+    #[test]
+    fn landscape_touch_controls_preserve_minimum_target_size() {
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(500.0, 320.0));
+        let layout = touch_control_layout(rect, LayoutMode::CompactLandscape).unwrap();
+        for action in TouchControlAction::ALL {
+            let target = layout.rect_for(action);
+            assert!(target.width() >= 48.0);
+            assert!(target.height() >= 48.0);
+            assert!(rect.contains_rect(target));
+        }
+    }
+
+    #[test]
+    fn responsive_mode_uses_space_and_input_capability() {
+        let desktop = Rect::from_min_size(Pos2::ZERO, vec2(960.0, 720.0));
+        assert_eq!(layout_mode(desktop, false), LayoutMode::Desktop);
+        assert_eq!(layout_mode(desktop, true), LayoutMode::CompactLandscape);
+
+        let phone = Rect::from_min_size(Pos2::ZERO, vec2(360.0, 640.0));
+        assert_eq!(layout_mode(phone, false), LayoutMode::CompactPortrait);
+        assert_eq!(layout_mode(phone, true), LayoutMode::CompactPortrait);
     }
 }

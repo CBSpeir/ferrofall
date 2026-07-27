@@ -24,10 +24,13 @@ Then open <http://127.0.0.1:8080>. The production bundle is generated in
 trunk build --release
 ```
 
-The first web release supports current desktop Chrome, Edge, Firefox, and
-Safari. It requires a keyboard and a viewport of at least 720 by 560 logical
-pixels. Touch-only and smaller devices receive an explanatory screen rather
-than a compressed game layout.
+The web release supports current desktop Chrome, Edge, Firefox, and Safari,
+plus current iOS Safari and Android Chrome. Phones use a purpose-built touch
+HUD in portrait or landscape; narrow keyboard windows use the same compact
+layout without touch controls. The official phone target starts at a 360 by
+640 CSS-pixel screen. After browser chrome and safe-area insets, the playable
+canvas requires at least 320 by 500 logical pixels in portrait or 500 by 320
+in landscape.
 
 ## Run the native app
 
@@ -51,12 +54,23 @@ the browser's local storage.
 - `R`: restart while paused or after game over
 - `M`: mute or unmute sound
 
-The mouse is used only for menus and overlay buttons. Losing focus or hiding
-the browser tab automatically pauses the game and clears held input.
+On touch devices, the lower controls provide Left, Soft Drop, Right, Hold,
+both rotations, and Hard Drop. Movement buttons support press-and-hold and
+sliding between directions. Rotations and Hold fire on contact. Hard Drop
+fires only when the finger lifts inside its separated button, so sliding away
+cancels it. Every touch target is at least 48 by 48 CSS pixels, and independent
+contacts allow movement and rotation at the same time.
 
-The web title screen offers an optional Fullscreen action. Reloading or closing
-the page abandons the active run without a confirmation dialog. Ferrofall has
-no accounts, analytics, cookies, service worker, or remote telemetry.
+The mouse is used only for menus and overlay buttons. Losing focus, hiding the
+browser tab, or rotating a touch device automatically pauses the game and
+clears held input. Returning focus never resumes automatically. Ordinary
+mobile browser-toolbar resizing does not pause play.
+
+The web title screen offers an optional Fullscreen action when the browser
+supports it, but normal in-browser play is the baseline. Reloading, closing,
+or navigating away abandons the active run without a confirmation dialog.
+Ferrofall has no accounts, analytics, cookies, service worker, or remote
+telemetry.
 
 The speaker control opens a master sound-effects volume slider. Volume and mute
 state are stored locally on both web and native builds. Audio starts only after
@@ -82,6 +96,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 cargo check --target wasm32-unknown-unknown
 trunk build --release
+python3 tools/check_web_bundle.py dist
 npm ci
 npx playwright install chromium
 npm run test:web

@@ -27,20 +27,7 @@
   ];
   const Context = window.AudioContext || window.webkitAudioContext;
   const canLoadAudio = Boolean(Context && typeof window.fetch === "function");
-  const encoded = canLoadAudio
-    ? new Map(
-        stems.map((stem) => [
-          stem,
-          window
-            .fetch(new URL(`audio/${stem}.wav`, document.baseURI))
-            .then((response) => {
-              if (!response.ok) throw new Error("audio asset unavailable");
-              return response.arrayBuffer();
-            })
-            .catch(() => null),
-        ]),
-      )
-    : new Map();
+  let encoded = null;
   const buffers = new Map();
   const activeSources = new Set();
   let context = null;
@@ -50,10 +37,27 @@
   let failed = !canLoadAudio;
   let masterVolume = 0.7;
 
+  function prepareBank() {
+    if (encoded || !canLoadAudio) return;
+    encoded = new Map(
+      stems.map((stem) => [
+        stem,
+        window
+          .fetch(new URL(`audio/${stem}.wav`, document.baseURI))
+          .then((response) => {
+            if (!response.ok) throw new Error("audio asset unavailable");
+            return response.arrayBuffer();
+          })
+          .catch(() => null),
+      ]),
+    );
+  }
+
   function ensureContext() {
     if (failed) return false;
     if (context) return true;
     try {
+      prepareBank();
       context = new Context({ latencyHint: "interactive" });
       master = context.createGain();
       master.gain.value = masterVolume;
@@ -71,8 +75,9 @@
   async function decodeBank() {
     if (decodeStarted || !context) return;
     decodeStarted = true;
+    prepareBank();
     const results = await Promise.all(
-      [...encoded].map(async ([stem, pending]) => {
+      [...(encoded || [])].map(async ([stem, pending]) => {
         const bytes = await pending;
         if (!bytes) return;
         try {
@@ -113,6 +118,7 @@
   }
 
   window.ferrofallAudioAvailable = () => !failed;
+  window.ferrofallAudioPrepare = prepareBank;
   window.ferrofallAudioActivate = activate;
   window.ferrofallAudioSetMasterVolume = (volume) => {
     masterVolume = Math.max(0, Math.min(1, Number(volume) || 0));

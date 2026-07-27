@@ -1,19 +1,56 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use eframe::egui::{self, Event, Key};
+use eframe::egui::{self, Event, Key, Pos2, Rect, TouchId, TouchPhase};
 use web_time::Instant;
 
 use crate::audio::{AudioSystem, Cue, DEFAULT_VOLUME};
 use crate::game::{Action, Command, Game, GameConfig};
 use crate::platform;
-use crate::ui::{AudioUiState, Screen, UiAction, VisualEffects};
+use crate::ui::{
+    AudioUiState, Screen, TouchControlAction, UiAction, UiOutput, UiState, VisualEffects,
+};
 
 const SIMULATION_STEP: Duration = Duration::from_nanos(1_000_000_000 / 60);
 const MAX_CATCH_UP: Duration = Duration::from_millis(250);
 const AUDIO_NOTICE_DURATION: Duration = Duration::from_millis(1_200);
 const AUDIO_VOLUME_KEY: &str = "ferrofall.audio-volume.v1";
 const AUDIO_MUTED_KEY: &str = "ferrofall.audio-muted.v1";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ViewportOrientation {
+    Portrait,
+    Landscape,
+}
+
+impl ViewportOrientation {
+    fn from_rect(rect: Rect) -> Self {
+        if rect.height() >= rect.width() {
+            Self::Portrait
+        } else {
+            Self::Landscape
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TouchBinding {
+    Held(Option<TouchControlAction>),
+    Immediate(TouchControlAction),
+    HardDrop { armed: bool },
+    Ignored,
+}
+
+impl TouchBinding {
+    fn active_action(self) -> Option<TouchControlAction> {
+        match self {
+            Self::Held(action) => action,
+            Self::Immediate(action) => Some(action),
+            Self::HardDrop { armed: true } => Some(TouchControlAction::HardDrop),
+            Self::HardDrop { armed: false } | Self::Ignored => None,
+        }
+    }
+}
 
 pub(crate) struct FerrofallApp {
     screen: Screen,
@@ -22,6 +59,10 @@ pub(crate) struct FerrofallApp {
     last_frame: Instant,
     accumulator: Duration,
     pressed_keys: BTreeSet<Key>,
+    touch_contacts: BTreeMap<TouchId, TouchBinding>,
+    touch_mode: bool,
+    touch_event_this_frame: bool,
+    viewport_orientation: Option<ViewportOrientation>,
     effects: VisualEffects,
     audio: AudioSystem,
     audio_controls_open: bool,
@@ -77,6 +118,10 @@ impl FerrofallApp {
             last_frame: Instant::now(),
             accumulator: Duration::ZERO,
             pressed_keys: BTreeSet::new(),
+            touch_contacts: BTreeMap::new(),
+            touch_mode: platform::prefers_touch_controls(),
+            touch_event_this_frame: false,
+            viewport_orientation: None,
             effects: VisualEffects::default(),
             audio: AudioSystem::new(volume, muted),
             audio_controls_open: false,
@@ -138,6 +183,7 @@ impl FerrofallApp {
         self.last_frame = Instant::now();
         self.accumulator = Duration::ZERO;
         self.pressed_keys.clear();
+        self.touch_contacts.clear();
         self.effects.clear();
     }
 
@@ -164,6 +210,7 @@ impl FerrofallApp {
             self.last_frame = Instant::now();
             self.accumulator = Duration::ZERO;
             self.pressed_keys.clear();
+            self.touch_contacts.clear();
             self.audio.play_ui(Cue::Resume);
         }
     }
@@ -174,14 +221,35 @@ impl FerrofallApp {
         self.game = None;
         self.accumulator = Duration::ZERO;
         self.pressed_keys.clear();
+        self.touch_contacts.clear();
         self.effects.clear();
         self.audio.stop_all();
     }
 
     fn clear_gameplay_input(&mut self) {
         self.pressed_keys.clear();
+        self.touch_contacts.clear();
         if let Some(game) = self.game.as_mut() {
             game.clear_input();
+        }
+    }
+
+    fn clear_touch_input(&mut self) {
+        let mut held_actions = Vec::new();
+        for binding in self.touch_contacts.values() {
+            if let TouchBinding::Held(Some(control)) = binding {
+                let action = touch_to_game_action(*control);
+                if !held_actions.contains(&action) {
+                    held_actions.push(action);
+                }
+            }
+        }
+        self.touch_contacts.clear();
+        held_actions.retain(|action| !self.any_pressed_key_maps_to(*action));
+        if let Some(game) = self.game.as_mut() {
+            for action in held_actions {
+                game.apply(Command::Release(action));
+            }
         }
     }
 
@@ -230,11 +298,13 @@ impl FerrofallApp {
 
         if pressed {
             if !self.other_pressed_key_maps_to(key, action)
+                && !self.touch_holds_action(action)
                 && let Some(game) = self.game.as_mut()
             {
                 game.apply(Command::Press(action));
             }
         } else if !self.any_pressed_key_maps_to(action)
+            && !self.touch_holds_action(action)
             && let Some(game) = self.game.as_mut()
         {
             game.apply(Command::Release(action));
@@ -277,6 +347,188 @@ impl FerrofallApp {
         self.pressed_keys
             .iter()
             .any(|pressed| key_to_action(*pressed) == Some(action))
+    }
+
+    fn touch_controls_enabled(&self) -> bool {
+        self.touch_mode || platform::prefers_touch_controls()
+    }
+
+    fn touch_holds_action(&self, action: Action) -> bool {
+        self.touch_contacts.values().any(|binding| {
+            matches!(binding, TouchBinding::Held(Some(control)) if touch_to_game_action(*control) == action)
+        })
+    }
+
+    fn other_touch_holds_action(&self, id: TouchId, action: Action) -> bool {
+        self.touch_contacts.iter().any(|(touch_id, binding)| {
+            *touch_id != id
+                && matches!(binding, TouchBinding::Held(Some(control)) if touch_to_game_action(*control) == action)
+        })
+    }
+
+    fn set_touch_held(&mut self, id: TouchId, next: Option<TouchControlAction>) {
+        let current = self
+            .touch_contacts
+            .get(&id)
+            .and_then(|binding| match binding {
+                TouchBinding::Held(action) => *action,
+                TouchBinding::Immediate(_)
+                | TouchBinding::HardDrop { .. }
+                | TouchBinding::Ignored => None,
+            });
+        if current == next {
+            return;
+        }
+
+        if let Some(current) = current {
+            let action = touch_to_game_action(current);
+            if !self.other_touch_holds_action(id, action)
+                && !self.any_pressed_key_maps_to(action)
+                && let Some(game) = self.game.as_mut()
+            {
+                game.apply(Command::Release(action));
+            }
+        }
+        if let Some(next) = next {
+            let action = touch_to_game_action(next);
+            if !self.other_touch_holds_action(id, action)
+                && !self.any_pressed_key_maps_to(action)
+                && let Some(game) = self.game.as_mut()
+            {
+                game.apply(Command::Press(action));
+            }
+        }
+        self.touch_contacts.insert(id, TouchBinding::Held(next));
+    }
+
+    fn finish_touch(&mut self, id: TouchId, phase: TouchPhase, pos: Pos2, viewport: Rect) {
+        let Some(binding) = self.touch_contacts.remove(&id) else {
+            return;
+        };
+        match binding {
+            TouchBinding::Held(Some(control)) => {
+                let action = touch_to_game_action(control);
+                if !self.touch_holds_action(action)
+                    && !self.any_pressed_key_maps_to(action)
+                    && let Some(game) = self.game.as_mut()
+                {
+                    game.apply(Command::Release(action));
+                }
+            }
+            TouchBinding::HardDrop { armed }
+                if phase == TouchPhase::End
+                    && armed
+                    && crate::ui::touch_control_layout(
+                        viewport,
+                        crate::ui::layout_mode(viewport, true),
+                    )
+                    .is_some_and(|layout| layout.contains(TouchControlAction::HardDrop, pos)) =>
+            {
+                if let Some(game) = self.game.as_mut() {
+                    game.apply(Command::Press(Action::HardDrop));
+                }
+            }
+            TouchBinding::Held(None)
+            | TouchBinding::Immediate(_)
+            | TouchBinding::HardDrop { .. }
+            | TouchBinding::Ignored => {}
+        }
+    }
+
+    fn handle_touch_event(&mut self, id: TouchId, phase: TouchPhase, pos: Pos2, viewport: Rect) {
+        self.touch_mode = true;
+        self.touch_event_this_frame = true;
+
+        if self.screen != Screen::Playing
+            || platform::browser_support_issue(viewport.size()).is_some()
+        {
+            if matches!(phase, TouchPhase::End | TouchPhase::Cancel) {
+                self.finish_touch(id, phase, pos, viewport);
+            }
+            return;
+        }
+
+        let Some(layout) =
+            crate::ui::touch_control_layout(viewport, crate::ui::layout_mode(viewport, true))
+        else {
+            self.clear_gameplay_input();
+            return;
+        };
+
+        match phase {
+            TouchPhase::Start => {
+                if self.touch_contacts.contains_key(&id) {
+                    self.finish_touch(id, TouchPhase::Cancel, pos, viewport);
+                }
+                match layout.action_at(pos) {
+                    Some(action) if action.is_held() => {
+                        self.touch_contacts.insert(id, TouchBinding::Held(None));
+                        self.set_touch_held(id, Some(action));
+                    }
+                    Some(TouchControlAction::HardDrop) => {
+                        self.touch_contacts
+                            .insert(id, TouchBinding::HardDrop { armed: true });
+                    }
+                    Some(action) => {
+                        if let Some(game) = self.game.as_mut() {
+                            game.apply(Command::Press(touch_to_game_action(action)));
+                        }
+                        self.touch_contacts
+                            .insert(id, TouchBinding::Immediate(action));
+                    }
+                    None => {
+                        self.touch_contacts.insert(id, TouchBinding::Ignored);
+                    }
+                }
+            }
+            TouchPhase::Move => match self.touch_contacts.get(&id).copied() {
+                Some(TouchBinding::Held(_)) => {
+                    self.set_touch_held(id, layout.held_action_at(pos));
+                }
+                Some(TouchBinding::HardDrop { armed }) => {
+                    self.touch_contacts.insert(
+                        id,
+                        TouchBinding::HardDrop {
+                            armed: armed && layout.contains(TouchControlAction::HardDrop, pos),
+                        },
+                    );
+                }
+                Some(TouchBinding::Immediate(_) | TouchBinding::Ignored) | None => {}
+            },
+            TouchPhase::End | TouchPhase::Cancel => {
+                self.finish_touch(id, phase, pos, viewport);
+            }
+        }
+    }
+
+    fn active_touch_controls(&self) -> Vec<TouchControlAction> {
+        self.touch_contacts
+            .values()
+            .filter_map(|binding| binding.active_action())
+            .collect()
+    }
+
+    fn activate_control_without_touch(&mut self, control: TouchControlAction) {
+        let Some(game) = self.game.as_mut() else {
+            return;
+        };
+        let action = touch_to_game_action(control);
+        game.apply(Command::Press(action));
+        if control.is_held() {
+            game.apply(Command::Release(action));
+        }
+    }
+
+    fn handle_viewport_orientation(&mut self, viewport: Rect) {
+        let orientation = ViewportOrientation::from_rect(viewport);
+        if self.touch_controls_enabled()
+            && self
+                .viewport_orientation
+                .is_some_and(|previous| previous != orientation)
+        {
+            self.pause(false);
+        }
+        self.viewport_orientation = Some(orientation);
     }
 
     fn advance_game(&mut self, now: Instant) {
@@ -409,30 +661,44 @@ impl FerrofallApp {
 impl eframe::App for FerrofallApp {
     fn logic(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         let now = Instant::now();
+        self.touch_event_this_frame = false;
+        let resolution_changed = platform::sync_canvas_resolution();
+        if resolution_changed {
+            self.clear_touch_input();
+            context.request_repaint();
+        }
+        let viewport = context.viewport_rect();
+        self.handle_viewport_orientation(viewport);
 
         #[cfg(feature = "qa-screenshot")]
         let focused = true;
         #[cfg(not(feature = "qa-screenshot"))]
-        let focused = context.input(|input| input.viewport().focused.unwrap_or(true));
+        let focused = context.input(|input| {
+            input.viewport().focused.unwrap_or(true) && !input.viewport().occluded.unwrap_or(false)
+        });
         self.handle_focus(focused);
 
-        let key_events = context.input(|input| {
+        let input_events = context.input(|input| {
             input
                 .events
                 .iter()
-                .filter_map(|event| match event {
-                    Event::Key {
-                        key,
-                        pressed,
-                        repeat,
-                        ..
-                    } => Some((*key, *pressed, *repeat)),
-                    _ => None,
-                })
+                .filter(|event| matches!(event, Event::Key { .. } | Event::Touch { .. }))
+                .cloned()
                 .collect::<Vec<_>>()
         });
-        for (key, pressed, repeat) in key_events {
-            self.handle_key_event(key, pressed, repeat);
+        for event in input_events {
+            match event {
+                Event::Key {
+                    key,
+                    pressed,
+                    repeat,
+                    ..
+                } => self.handle_key_event(key, pressed, repeat),
+                Event::Touch { id, phase, pos, .. } if !resolution_changed => {
+                    self.handle_touch_event(id, phase, pos, viewport)
+                }
+                _ => {}
+            }
         }
 
         self.advance_game(now);
@@ -467,30 +733,55 @@ impl eframe::App for FerrofallApp {
         if let Some(issue) = platform::browser_support_issue(ui.max_rect().size()) {
             self.pause(false);
             let (screen, status) = match issue {
-                platform::BrowserSupportIssue::TouchOnly => (
-                    "unsupported-device",
-                    "Ferrofall requires a desktop or laptop browser with a keyboard.",
-                ),
                 platform::BrowserSupportIssue::ViewportTooSmall => (
                     "viewport-too-small",
-                    "Ferrofall needs a browser viewport of at least 720 by 560 pixels.",
+                    "Ferrofall needs a safe viewport of at least 320 by 500 pixels, or 500 by 320 in landscape.",
                 ),
             };
+            platform::set_canvas_layout("unsupported", false);
+            platform::set_canvas_touch_metadata("", "");
             self.set_accessible_status(screen, status.to_owned());
             crate::ui::show_browser_support_issue(ui, issue);
             return;
         }
 
+        let touch_controls = self.touch_controls_enabled();
+        let layout_mode = crate::ui::layout_mode(ui.max_rect(), touch_controls);
+        let control_layout = (touch_controls && self.screen == Screen::Playing)
+            .then(|| crate::ui::touch_control_layout(ui.max_rect(), layout_mode))
+            .flatten();
+        let touch_controls_visible = control_layout.is_some();
+        let active_touch_controls = self.active_touch_controls();
+        let active_touch_metadata = active_touch_controls
+            .iter()
+            .map(|control| control.data_label())
+            .collect::<Vec<_>>()
+            .join(",");
+        let touch_region_metadata = control_layout
+            .as_ref()
+            .map(crate::ui::TouchControlLayout::metadata)
+            .unwrap_or_default();
+        platform::set_canvas_layout(layout_mode.label(), touch_controls_visible);
+        platform::set_canvas_touch_metadata(&touch_region_metadata, &active_touch_metadata);
         let now = Instant::now();
         let audio_notice = self.active_audio_notice(now).map(str::to_owned);
         let (screen, mut status) = match self.screen {
             Screen::Title => (
                 "title",
-                "Ferrofall title screen. Press Enter or choose Play to begin.".to_owned(),
+                if touch_controls {
+                    "Ferrofall title screen. Tap Play to begin with two-thumb controls.".to_owned()
+                } else {
+                    "Ferrofall title screen. Press Enter or choose Play to begin.".to_owned()
+                },
             ),
             Screen::Playing => (
                 "playing",
-                "Ferrofall game in progress. Press Escape to pause.".to_owned(),
+                if touch_controls {
+                    "Ferrofall game in progress. Use the labeled touch controls or tap Pause."
+                        .to_owned()
+                } else {
+                    "Ferrofall game in progress. Press Escape to pause.".to_owned()
+                },
             ),
             Screen::Paused => (
                 "paused",
@@ -514,23 +805,36 @@ impl eframe::App for FerrofallApp {
         }
         self.set_accessible_status(screen, status);
 
-        let action = crate::ui::show(
+        let UiOutput {
+            action,
+            control_click,
+        } = crate::ui::show(
             ui,
             self.screen,
-            self.game.as_ref(),
-            self.session_best,
-            &self.effects,
-            now,
-            AudioUiState {
-                volume: self.audio.volume(),
-                muted: self.audio.is_muted(),
-                available: self.audio.is_available(),
-                controls_open: self.audio_controls_open,
-                notice: audio_notice.as_deref(),
-                failure_reason: self.audio.failure_reason(),
+            UiState {
+                game: self.game.as_ref(),
+                session_best: self.session_best,
+                effects: &self.effects,
+                now,
+                audio: AudioUiState {
+                    volume: self.audio.volume(),
+                    muted: self.audio.is_muted(),
+                    available: self.audio.is_available(),
+                    controls_open: self.audio_controls_open,
+                    notice: audio_notice.as_deref(),
+                    failure_reason: self.audio.failure_reason(),
+                },
+                touch_controls,
+                active_touch_controls: &active_touch_controls,
             },
         );
         self.handle_ui_action(action, ui.ctx());
+        if !self.touch_event_this_frame
+            && self.screen == Screen::Playing
+            && let Some(control) = control_click
+        {
+            self.activate_control_without_touch(control);
+        }
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -561,6 +865,18 @@ fn key_to_action(key: Key) -> Option<Action> {
         Key::C | Key::ShiftLeft => Some(Action::Hold),
         Key::Space => Some(Action::HardDrop),
         _ => None,
+    }
+}
+
+fn touch_to_game_action(action: TouchControlAction) -> Action {
+    match action {
+        TouchControlAction::Left => Action::Left,
+        TouchControlAction::SoftDrop => Action::SoftDrop,
+        TouchControlAction::Right => Action::Right,
+        TouchControlAction::Hold => Action::Hold,
+        TouchControlAction::RotateCounterclockwise => Action::RotateCounterclockwise,
+        TouchControlAction::RotateClockwise => Action::RotateClockwise,
+        TouchControlAction::HardDrop => Action::HardDrop,
     }
 }
 
@@ -698,5 +1014,113 @@ mod tests {
         eframe::App::save(&mut app, &mut saved);
         assert_eq!(saved.get_string(AUDIO_VOLUME_KEY).as_deref(), Some("0.81"));
         assert_eq!(saved.get_string(AUDIO_MUTED_KEY).as_deref(), Some("false"));
+    }
+
+    #[test]
+    fn touch_movement_can_slide_between_directions() {
+        let mut app = FerrofallApp::initial_state();
+        app.start_game();
+        let viewport = Rect::from_min_size(Pos2::ZERO, egui::vec2(360.0, 640.0));
+        let controls =
+            crate::ui::touch_control_layout(viewport, crate::ui::LayoutMode::CompactPortrait)
+                .unwrap();
+        let before = app
+            .game
+            .as_ref()
+            .unwrap()
+            .active_blocks()
+            .into_iter()
+            .map(|block| block.x)
+            .min()
+            .unwrap();
+
+        let touch = TouchId(7);
+        app.handle_touch_event(
+            touch,
+            TouchPhase::Start,
+            controls.rect_for(TouchControlAction::Left).center(),
+            viewport,
+        );
+        app.game.as_mut().unwrap().step();
+        let after_left = app
+            .game
+            .as_ref()
+            .unwrap()
+            .active_blocks()
+            .into_iter()
+            .map(|block| block.x)
+            .min()
+            .unwrap();
+        assert_eq!(after_left, before - 1);
+
+        app.handle_touch_event(
+            touch,
+            TouchPhase::Move,
+            controls.rect_for(TouchControlAction::Right).center(),
+            viewport,
+        );
+        app.game.as_mut().unwrap().step();
+        let after_right = app
+            .game
+            .as_ref()
+            .unwrap()
+            .active_blocks()
+            .into_iter()
+            .map(|block| block.x)
+            .min()
+            .unwrap();
+        assert_eq!(after_right, before);
+
+        app.handle_touch_event(
+            touch,
+            TouchPhase::End,
+            controls.rect_for(TouchControlAction::Right).center(),
+            viewport,
+        );
+        assert!(app.touch_contacts.is_empty());
+    }
+
+    #[test]
+    fn hard_drop_requires_release_inside_its_control() {
+        let mut app = FerrofallApp::initial_state();
+        app.start_game();
+        let viewport = Rect::from_min_size(Pos2::ZERO, egui::vec2(360.0, 640.0));
+        let controls =
+            crate::ui::touch_control_layout(viewport, crate::ui::LayoutMode::CompactPortrait)
+                .unwrap();
+        let hard_drop = controls.rect_for(TouchControlAction::HardDrop).center();
+        let outside = viewport.center();
+
+        app.handle_touch_event(TouchId(1), TouchPhase::Start, hard_drop, viewport);
+        app.handle_touch_event(TouchId(1), TouchPhase::Move, outside, viewport);
+        app.handle_touch_event(TouchId(1), TouchPhase::Move, hard_drop, viewport);
+        app.handle_touch_event(TouchId(1), TouchPhase::End, hard_drop, viewport);
+        app.game.as_mut().unwrap().step();
+        assert_eq!(locked_cell_count(app.game.as_ref().unwrap()), 0);
+
+        app.handle_touch_event(TouchId(2), TouchPhase::Start, hard_drop, viewport);
+        app.handle_touch_event(TouchId(2), TouchPhase::End, hard_drop, viewport);
+        app.game.as_mut().unwrap().step();
+        assert_eq!(locked_cell_count(app.game.as_ref().unwrap()), 4);
+    }
+
+    #[test]
+    fn touch_orientation_change_pauses_and_clears_input() {
+        let mut app = FerrofallApp::initial_state();
+        app.touch_mode = true;
+        app.start_game();
+        app.handle_viewport_orientation(Rect::from_min_size(Pos2::ZERO, egui::vec2(360.0, 640.0)));
+        assert_eq!(app.screen, Screen::Playing);
+
+        app.handle_viewport_orientation(Rect::from_min_size(Pos2::ZERO, egui::vec2(640.0, 360.0)));
+        assert_eq!(app.screen, Screen::Paused);
+        assert!(app.touch_contacts.is_empty());
+    }
+
+    fn locked_cell_count(game: &Game) -> usize {
+        (0..crate::game::BOARD_HEIGHT)
+            .flat_map(|y| (0..crate::game::BOARD_WIDTH).map(move |x| (x, y)))
+            .filter(|(x, y)| game.board().cell(*x, *y).is_some())
+            .count()
     }
 }
