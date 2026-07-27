@@ -147,16 +147,32 @@ test.describe("mobile touch play", () => {
 
     const client = await context.newCDPSession(page);
     const clockwise = center(regions.get("rotate-cw"));
+    const counterclockwise = center(regions.get("rotate-ccw"));
     await dispatchTouches(client, "touchStart", [clockwise]);
     await expect(canvas).toHaveAttribute("data-touch-active", "rotate-cw");
-    await dispatchTouches(client, "touchMove", [{ x: 180, y: 400 }]);
-    await expect(canvas).toHaveAttribute("data-touch-active", "");
-    await dispatchTouches(client, "touchMove", [clockwise]);
-    await expect(canvas).toHaveAttribute("data-touch-active", "");
-    await dispatchTouches(client, "touchEnd", []);
     await expect
       .poll(() => page.evaluate(() => window.__ferrofallRotationPlays))
-      .toBe(0);
+      .toBe(1);
+    await dispatchTouches(client, "touchMove", [{ x: 180, y: 400 }]);
+    await expect(canvas).toHaveAttribute("data-touch-active", "rotate-cw");
+    await dispatchTouches(client, "touchMove", [clockwise]);
+    await expect(canvas).toHaveAttribute("data-touch-active", "rotate-cw");
+    await dispatchTouches(client, "touchEnd", []);
+    await expect(canvas).toHaveAttribute("data-touch-active", "");
+    await expect
+      .poll(() => page.evaluate(() => window.__ferrofallRotationPlays))
+      .toBe(1);
+
+    await dispatchTouches(client, "touchStart", [counterclockwise]);
+    await expect(canvas).toHaveAttribute("data-touch-active", "rotate-ccw");
+    await expect
+      .poll(() => page.evaluate(() => window.__ferrofallRotationPlays))
+      .toBe(2);
+    await dispatchTouches(client, "touchEnd", []);
+    await expect(canvas).toHaveAttribute("data-touch-active", "");
+    await expect
+      .poll(() => page.evaluate(() => window.__ferrofallRotationPlays))
+      .toBe(2);
 
     await dispatchTouches(client, "touchStart", [
       center(regions.get("left")),
@@ -170,7 +186,7 @@ test.describe("mobile touch play", () => {
     await expect(canvas).toHaveAttribute("data-touch-active", "");
     await expect
       .poll(() => page.evaluate(() => window.__ferrofallRotationPlays))
-      .toBe(1);
+      .toBe(3);
 
     await page.setViewportSize({ width: 640, height: 360 });
     await expect(canvas).toHaveAttribute("data-screen", "paused");

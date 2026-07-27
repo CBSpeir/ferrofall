@@ -130,13 +130,11 @@ impl LayoutMode {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct UiOutput {
     pub(crate) action: UiAction,
-    pub(crate) control_click: Option<TouchControlAction>,
 }
 
 impl UiOutput {
     const NONE: Self = Self {
         action: UiAction::None,
-        control_click: None,
     };
 }
 
@@ -260,17 +258,14 @@ pub(crate) fn show(ui: &mut egui::Ui, screen: Screen, state: UiState<'_>) -> UiO
         action
     };
 
-    let control_click = if screen == Screen::Playing && state.touch_controls {
-        touch_control_layout(rect, layout_mode)
-            .and_then(|layout| paint_touch_controls(ui, &layout, state.active_touch_controls))
-    } else {
-        None
-    };
-
-    UiOutput {
-        action,
-        control_click,
+    if screen == Screen::Playing
+        && state.touch_controls
+        && let Some(layout) = touch_control_layout(rect, layout_mode)
+    {
+        paint_touch_controls(ui, &layout, state.active_touch_controls);
     }
+
+    UiOutput { action }
 }
 
 pub(crate) fn show_browser_support_issue(ui: &mut egui::Ui, issue: BrowserSupportIssue) {
@@ -1389,8 +1384,7 @@ fn paint_touch_controls(
     ui: &mut egui::Ui,
     layout: &TouchControlLayout,
     active: &[TouchControlAction],
-) -> Option<TouchControlAction> {
-    let mut clicked = None;
+) {
     for control in &layout.controls {
         let response = ui.interact(
             control.rect,
@@ -1461,11 +1455,7 @@ fn paint_touch_controls(
                 );
             }
         }
-        if response.clicked() {
-            clicked = Some(control.action);
-        }
     }
-    clicked
 }
 
 fn paint_rotation_icon(painter: &Painter, rect: Rect, clockwise: bool, color: Color32) {

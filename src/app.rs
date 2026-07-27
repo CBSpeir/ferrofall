@@ -14,7 +14,6 @@ use crate::ui::{
 const SIMULATION_STEP: Duration = Duration::from_nanos(1_000_000_000 / 60);
 const MAX_CATCH_UP: Duration = Duration::from_millis(250);
 const AUDIO_NOTICE_DURATION: Duration = Duration::from_millis(1_200);
-const TOUCH_CLICK_ECHO_WINDOW: Duration = Duration::from_millis(250);
 const AUDIO_VOLUME_KEY: &str = "ferrofall.audio-volume.v1";
 const AUDIO_MUTED_KEY: &str = "ferrofall.audio-muted.v1";
 
@@ -57,14 +56,6 @@ impl TouchBinding {
             Self::ReleaseAction { armed: false, .. } | Self::Ignored => None,
         }
     }
-
-    fn click_action(self) -> Option<TouchControlAction> {
-        match self {
-            Self::Held(action) => action,
-            Self::Immediate(action) | Self::ReleaseAction { action, .. } => Some(action),
-            Self::Ignored => None,
-        }
-    }
 }
 
 pub(crate) struct FerrofallApp {
@@ -76,8 +67,6 @@ pub(crate) struct FerrofallApp {
     pressed_keys: BTreeSet<Key>,
     touch_contacts: BTreeMap<TouchId, TouchBinding>,
     touch_mode: bool,
-    touch_event_this_frame: bool,
-    touch_click_guard: Option<(TouchControlAction, Instant)>,
     viewport_orientation: Option<ViewportOrientation>,
     effects: VisualEffects,
     audio: AudioSystem,
@@ -136,8 +125,6 @@ impl FerrofallApp {
             pressed_keys: BTreeSet::new(),
             touch_contacts: BTreeMap::new(),
             touch_mode: platform::prefers_touch_controls(),
-            touch_event_this_frame: false,
-            touch_click_guard: None,
             viewport_orientation: None,
             effects: VisualEffects::default(),
             audio: AudioSystem::new(volume, muted),
@@ -422,11 +409,6 @@ impl FerrofallApp {
         let Some(binding) = self.touch_contacts.remove(&id) else {
             return;
         };
-        if phase == TouchPhase::End
-            && let Some(action) = binding.click_action()
-        {
-            self.touch_click_guard = Some((action, Instant::now()));
-        }
         match binding {
             TouchBinding::Held(Some(control)) => {
                 let action = touch_to_game_action(control);
@@ -459,7 +441,6 @@ impl FerrofallApp {
 
     fn handle_touch_event(&mut self, id: TouchId, phase: TouchPhase, pos: Pos2, viewport: Rect) {
         self.touch_mode = true;
-        self.touch_event_this_frame = true;
 
         if self.screen != Screen::Playing
             || platform::browser_support_issue(viewport.size()).is_some()
@@ -487,11 +468,7 @@ impl FerrofallApp {
                         self.touch_contacts.insert(id, TouchBinding::Held(None));
                         self.set_touch_held(id, Some(action));
                     }
-                    Some(
-                        action @ (TouchControlAction::RotateCounterclockwise
-                        | TouchControlAction::RotateClockwise
-                        | TouchControlAction::HardDrop),
-                    ) => {
+                    Some(action @ TouchControlAction::HardDrop) => {
                         self.touch_contacts.insert(
                             id,
                             TouchBinding::ReleaseAction {
@@ -538,37 +515,6 @@ impl FerrofallApp {
             .values()
             .filter_map(|binding| binding.active_action())
             .collect()
-    }
-
-    fn activate_control_without_touch(&mut self, control: TouchControlAction) {
-        let Some(game) = self.game.as_mut() else {
-            return;
-        };
-        let action = touch_to_game_action(control);
-        game.apply(Command::Press(action));
-        if control.is_held() {
-            game.apply(Command::Release(action));
-        }
-    }
-
-    fn handle_control_click(&mut self, control: TouchControlAction, now: Instant) {
-        let guarded = if let Some((guarded_control, touch_ended)) = self.touch_click_guard {
-            if now.duration_since(touch_ended) > TOUCH_CLICK_ECHO_WINDOW {
-                self.touch_click_guard = None;
-                false
-            } else if guarded_control == control {
-                self.touch_click_guard = None;
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
-        if !self.touch_event_this_frame && !guarded && self.screen == Screen::Playing {
-            self.activate_control_without_touch(control);
-        }
     }
 
     fn handle_viewport_orientation(&mut self, viewport: Rect) {
@@ -713,7 +659,6 @@ impl FerrofallApp {
 impl eframe::App for FerrofallApp {
     fn logic(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         let now = Instant::now();
-        self.touch_event_this_frame = false;
         let resolution_changed = platform::sync_canvas_resolution();
         if resolution_changed {
             self.clear_touch_input();
@@ -857,10 +802,7 @@ impl eframe::App for FerrofallApp {
         }
         self.set_accessible_status(screen, status);
 
-        let UiOutput {
-            action,
-            control_click,
-        } = crate::ui::show(
+        let UiOutput { action } = crate::ui::show(
             ui,
             self.screen,
             UiState {
@@ -881,9 +823,6 @@ impl eframe::App for FerrofallApp {
             },
         );
         self.handle_ui_action(action, ui.ctx());
-        if let Some(control) = control_click {
-            self.handle_control_click(control, now);
-        }
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -1154,7 +1093,7 @@ mod tests {
     }
 
     #[test]
-    fn rotation_requires_release_inside_its_control() {
+    fn rotation_fires_on_touch_start_without_repeating() {
         let mut app = FerrofallApp::initial_state();
         app.start_game();
         let viewport = Rect::from_min_size(Pos2::ZERO, egui::vec2(360.0, 640.0));
@@ -1164,18 +1103,13 @@ mod tests {
         let clockwise = controls
             .rect_for(TouchControlAction::RotateClockwise)
             .center();
+        let counterclockwise = controls
+            .rect_for(TouchControlAction::RotateCounterclockwise)
+            .center();
         let outside = viewport.center();
         app.game.as_mut().unwrap().drain_events().for_each(drop);
 
         app.handle_touch_event(TouchId(1), TouchPhase::Start, clockwise, viewport);
-        assert!(
-            !app.game
-                .as_mut()
-                .unwrap()
-                .drain_events()
-                .any(|event| { matches!(event, crate::game::GameEvent::Rotated { .. }) })
-        );
-        app.handle_touch_event(TouchId(1), TouchPhase::End, clockwise, viewport);
         app.game.as_mut().unwrap().step();
         assert!(
             app.game
@@ -1184,9 +1118,9 @@ mod tests {
                 .drain_events()
                 .any(|event| { matches!(event, crate::game::GameEvent::Rotated { .. }) })
         );
-        app.touch_event_this_frame = false;
-        app.handle_control_click(TouchControlAction::RotateClockwise, Instant::now());
-        app.game.as_mut().unwrap().step();
+        app.handle_touch_event(TouchId(1), TouchPhase::Move, outside, viewport);
+        app.handle_touch_event(TouchId(1), TouchPhase::Move, clockwise, viewport);
+        app.handle_touch_event(TouchId(1), TouchPhase::End, clockwise, viewport);
         assert!(
             !app.game
                 .as_mut()
@@ -1194,11 +1128,22 @@ mod tests {
                 .drain_events()
                 .any(|event| { matches!(event, crate::game::GameEvent::Rotated { .. }) })
         );
+        app.handle_touch_event(TouchId(2), TouchPhase::Start, counterclockwise, viewport);
+        app.game.as_mut().unwrap().step();
+        assert!(app.game.as_mut().unwrap().drain_events().any(|event| {
+            matches!(
+                event,
+                crate::game::GameEvent::Rotated {
+                    direction: crate::game::RotationDirection::Counterclockwise,
+                    ..
+                }
+            )
+        }));
+        app.handle_touch_event(TouchId(2), TouchPhase::End, counterclockwise, viewport);
 
-        app.handle_touch_event(TouchId(2), TouchPhase::Start, clockwise, viewport);
-        app.handle_touch_event(TouchId(2), TouchPhase::Move, outside, viewport);
-        app.handle_touch_event(TouchId(2), TouchPhase::Move, clockwise, viewport);
-        app.handle_touch_event(TouchId(2), TouchPhase::End, clockwise, viewport);
+        app.handle_touch_event(TouchId(3), TouchPhase::Start, outside, viewport);
+        app.handle_touch_event(TouchId(3), TouchPhase::Move, clockwise, viewport);
+        app.handle_touch_event(TouchId(3), TouchPhase::End, clockwise, viewport);
         app.game.as_mut().unwrap().step();
         assert!(
             !app.game
