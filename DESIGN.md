@@ -289,11 +289,12 @@ may exit fullscreen before a later Escape pauses the game.
 Escape pauses and resumes. `R` restarts only while paused or after game over.
 The mouse affects menus and overlay buttons only.
 
-Touch gameplay uses seven labeled controls with targets of at least 48 by 48
+Touch gameplay uses seven accessible controls with targets of at least 48 by 48
 CSS pixels. Left, Soft Drop, and Right form a slideable movement row. Hold is
-isolated above that row. Counterclockwise and clockwise rotation sit together,
-and Hard Drop is a larger separated action. Independent contacts allow a held
-movement action and a rotation at the same time.
+isolated above that row. Counterclockwise and clockwise rotation sit together
+as mirrored curved-arrow icons, and Hard Drop is a larger separated action.
+Independent contacts allow a held movement action and a rotation at the same
+time.
 
 Movement controls emit normal engine press and release commands, preserving
 delayed auto-shift and repeat timing. Sliding between movement buttons releases
@@ -425,7 +426,8 @@ web shell ships a matching SVG favicon.
 Accessibility requirements include:
 
 - full gameplay keyboard control;
-- labeled touch controls with targets of at least 48 by 48 CSS pixels;
+- touch controls with accessible labels and targets of at least 48 by 48 CSS
+  pixels;
 - strong text contrast;
 - scalable logical-point layout;
 - a ghost distinguished by both outline and opacity;

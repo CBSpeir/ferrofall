@@ -86,15 +86,14 @@ impl TouchControlAction {
         }
     }
 
-    const fn glyph(self) -> &'static str {
+    const fn text_glyph(self) -> Option<&'static str> {
         match self {
-            Self::Left => "◀",
-            Self::SoftDrop => "SOFT",
-            Self::Right => "▶",
-            Self::Hold => "HOLD",
-            Self::RotateCounterclockwise => "CCW",
-            Self::RotateClockwise => "CW",
-            Self::HardDrop => "DROP",
+            Self::Left => Some("◀"),
+            Self::SoftDrop => Some("SOFT"),
+            Self::Right => Some("▶"),
+            Self::Hold => Some("HOLD"),
+            Self::RotateCounterclockwise | Self::RotateClockwise => None,
+            Self::HardDrop => Some("DROP"),
         }
     }
 
@@ -1429,33 +1428,92 @@ fn paint_touch_controls(
             Stroke::new(if is_active { 1.8 } else { 1.1 }, stroke),
             StrokeKind::Inside,
         );
-        ui.painter().text(
-            control.rect.center(),
-            Align2::CENTER_CENTER,
-            control.action.glyph(),
-            if matches!(
-                control.action,
-                TouchControlAction::Hold
-                    | TouchControlAction::SoftDrop
-                    | TouchControlAction::RotateCounterclockwise
-                    | TouchControlAction::RotateClockwise
-                    | TouchControlAction::HardDrop
-            ) {
-                label_font((control.rect.height() * 0.20).clamp(10.0, 13.0))
-            } else {
-                display_font((control.rect.height() * 0.38).clamp(18.0, 25.0))
-            },
-            if is_active && control.action == TouchControlAction::HardDrop {
-                BACKGROUND
-            } else {
-                TEXT
-            },
-        );
+        let foreground = if is_active && control.action == TouchControlAction::HardDrop {
+            BACKGROUND
+        } else {
+            TEXT
+        };
+        match control.action {
+            TouchControlAction::RotateCounterclockwise => {
+                paint_rotation_icon(ui.painter(), control.rect, false, foreground);
+            }
+            TouchControlAction::RotateClockwise => {
+                paint_rotation_icon(ui.painter(), control.rect, true, foreground);
+            }
+            action => {
+                ui.painter().text(
+                    control.rect.center(),
+                    Align2::CENTER_CENTER,
+                    action
+                        .text_glyph()
+                        .expect("non-rotation touch controls must have text glyphs"),
+                    if matches!(
+                        action,
+                        TouchControlAction::Hold
+                            | TouchControlAction::SoftDrop
+                            | TouchControlAction::HardDrop
+                    ) {
+                        label_font((control.rect.height() * 0.20).clamp(10.0, 13.0))
+                    } else {
+                        display_font((control.rect.height() * 0.38).clamp(18.0, 25.0))
+                    },
+                    foreground,
+                );
+            }
+        }
         if response.clicked() {
             clicked = Some(control.action);
         }
     }
     clicked
+}
+
+fn paint_rotation_icon(painter: &Painter, rect: Rect, clockwise: bool, color: Color32) {
+    let icon_size = (rect.height() * 0.5).clamp(24.0, 32.0);
+    let radius = icon_size * 0.34;
+    let stroke_width = (rect.height() * 0.045).clamp(2.2, 2.7);
+    let start_angle = if clockwise {
+        std::f32::consts::FRAC_PI_4
+    } else {
+        3.0 * std::f32::consts::FRAC_PI_4
+    };
+    let sweep = if clockwise {
+        std::f32::consts::TAU * 0.75
+    } else {
+        -std::f32::consts::TAU * 0.75
+    };
+    let point_at = |angle: f32| {
+        pos2(
+            rect.center().x + radius * angle.cos(),
+            rect.center().y + radius * angle.sin(),
+        )
+    };
+    let segment_count = 24;
+    let arc = (0..=segment_count)
+        .map(|segment| point_at(start_angle + sweep * segment as f32 / segment_count as f32))
+        .collect();
+    painter.add(egui::Shape::line(arc, Stroke::new(stroke_width, color)));
+    painter.circle_filled(point_at(start_angle), stroke_width / 2.0, color);
+
+    let end_angle = start_angle + sweep;
+    let tip = point_at(end_angle);
+    let tangent = if clockwise {
+        vec2(-end_angle.sin(), end_angle.cos())
+    } else {
+        vec2(end_angle.sin(), -end_angle.cos())
+    };
+    let normal = vec2(-tangent.y, tangent.x);
+    let base_center = tip - tangent * (icon_size * 0.25);
+    let half_width = icon_size * 0.14;
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            tip,
+            base_center + normal * half_width,
+            base_center - normal * half_width,
+        ],
+        color,
+        Stroke::NONE,
+    ));
 }
 
 fn show_audio_control(
