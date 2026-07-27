@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod audio;
 mod game;
 mod platform;
 mod ui;

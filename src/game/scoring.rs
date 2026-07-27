@@ -14,6 +14,7 @@ pub(crate) struct ClearResult {
     pub(crate) score_delta: u64,
     pub(crate) combo: Option<u32>,
     pub(crate) back_to_back: bool,
+    pub(crate) back_to_back_bonus: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -118,6 +119,7 @@ impl ScoreState {
             score_delta,
             combo: self.combo(),
             back_to_back: self.back_to_back,
+            back_to_back_bonus: difficult && was_back_to_back,
         }
     }
 }
@@ -153,6 +155,8 @@ mod tests {
 
         assert_eq!(first.score_delta, 800);
         assert_eq!(second.score_delta, 1_250);
+        assert!(!first.back_to_back_bonus);
+        assert!(second.back_to_back_bonus);
         assert!(second.back_to_back);
         assert_eq!(no_clear.combo, None);
         assert!(no_clear.back_to_back);

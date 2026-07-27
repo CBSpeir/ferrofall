@@ -33,13 +33,39 @@ pub(crate) enum Command {
     Release(Action),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum MovementDirection {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RotationDirection {
+    Clockwise,
+    Counterclockwise,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum GameEvent {
+    Moved {
+        direction: MovementDirection,
+        column: i32,
+    },
+    Rotated {
+        direction: RotationDirection,
+        column: i32,
+    },
+    Held,
+    Grounded {
+        column: i32,
+    },
     HardDropped {
         from: [Point; 4],
         to: [Point; 4],
     },
-    PieceLocked,
+    PieceLocked {
+        column: i32,
+    },
     Cleared {
         rows: Vec<usize>,
         result: ClearResult,
@@ -170,6 +196,7 @@ pub(crate) struct Game {
     lock_resets: u8,
     lowest_origin_y: i32,
     last_action: Option<LastAction>,
+    contact_reported: bool,
     game_over: bool,
 }
 
@@ -202,6 +229,7 @@ impl Game {
             lock_resets: 0,
             lowest_origin_y: active.origin.y,
             last_action: None,
+            contact_reported: false,
             game_over: false,
         }
     }
@@ -238,6 +266,12 @@ impl Game {
         self.apply_gravity();
 
         if self.grounded() {
+            if !self.contact_reported {
+                self.events.push(GameEvent::Grounded {
+                    column: self.sound_column(),
+                });
+                self.contact_reported = true;
+            }
             self.lock_elapsed = self.lock_elapsed.saturating_add(1);
             if self.lock_elapsed >= self.config.lock_delay_ticks {
                 self.lock_active();
@@ -439,6 +473,14 @@ impl Game {
         self.active = candidate;
         self.last_action = None;
         self.consume_lock_reset(was_grounded);
+        self.events.push(GameEvent::Moved {
+            direction: if dx < 0 {
+                MovementDirection::Left
+            } else {
+                MovementDirection::Right
+            },
+            column: self.sound_column(),
+        });
         true
     }
 
@@ -487,6 +529,14 @@ impl Game {
             } else {
                 self.consume_lock_reset(was_grounded);
             }
+            self.events.push(GameEvent::Rotated {
+                direction: if clockwise {
+                    RotationDirection::Clockwise
+                } else {
+                    RotationDirection::Counterclockwise
+                },
+                column: self.sound_column(),
+            });
             return true;
         }
 
@@ -516,6 +566,7 @@ impl Game {
             self.take_next_piece()
         };
         self.hold_used = true;
+        self.events.push(GameEvent::Held);
         self.spawn_kind(incoming);
     }
 
@@ -542,7 +593,9 @@ impl Game {
             .all(|block| block.y < VISIBLE_TOP as i32);
 
         self.board.lock(self.active);
-        self.events.push(GameEvent::PieceLocked);
+        self.events.push(GameEvent::PieceLocked {
+            column: self.sound_column(),
+        });
         let rows = self.board.clear_full_rows();
         let perfect_clear = !rows.is_empty() && self.board.is_empty();
         let previous_level = self.score.level();
@@ -618,6 +671,7 @@ impl Game {
         self.lock_resets = 0;
         self.lowest_origin_y = self.active.origin.y;
         self.last_action = None;
+        self.contact_reported = false;
         self.input.reset_repeats();
 
         if self.board.collides(self.active) {
@@ -630,6 +684,15 @@ impl Game {
             self.game_over = true;
             self.events.push(GameEvent::GameOver);
         }
+    }
+
+    fn sound_column(&self) -> i32 {
+        self.active
+            .blocks()
+            .into_iter()
+            .map(|block| block.x)
+            .sum::<i32>()
+            / 4
     }
 }
 
@@ -786,6 +849,59 @@ mod tests {
         assert_eq!(occupied_cells(&game), 0);
         game.step();
         assert_eq!(occupied_cells(&game), 4);
+    }
+
+    #[test]
+    fn first_ground_contact_emits_once_per_piece() {
+        let mut game = Game::new(GameConfig::default(), 2);
+        game.active = ActivePiece {
+            kind: Tetromino::O,
+            rotation: Rotation::Spawn,
+            origin: Point::new(3, 38),
+        };
+        game.lowest_origin_y = game.active.origin.y;
+
+        game.step();
+        let first = game.drain_events().collect::<Vec<_>>();
+        game.step();
+        let second = game.drain_events().collect::<Vec<_>>();
+
+        assert_eq!(
+            first
+                .iter()
+                .filter(|event| matches!(event, GameEvent::Grounded { .. }))
+                .count(),
+            1
+        );
+        assert!(
+            !second
+                .iter()
+                .any(|event| matches!(event, GameEvent::Grounded { .. }))
+        );
+    }
+
+    #[test]
+    fn presentation_events_only_report_successful_actions() {
+        let mut game = Game::new(GameConfig::default(), 12);
+        game.active.origin.x = -1;
+        game.apply(Command::Press(Action::Left));
+        game.step();
+        assert!(
+            !game
+                .drain_events()
+                .any(|event| matches!(event, GameEvent::Moved { .. }))
+        );
+
+        game.apply(Command::Release(Action::Left));
+        game.apply(Command::Press(Action::Right));
+        game.step();
+        assert!(game.drain_events().any(|event| matches!(
+            event,
+            GameEvent::Moved {
+                direction: MovementDirection::Right,
+                ..
+            }
+        )));
     }
 
     #[test]

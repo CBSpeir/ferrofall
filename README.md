@@ -3,6 +3,8 @@
 Ferrofall is a falling-block puzzle game written in Rust. Its primary release
 is a static WebAssembly website rendered with `eframe` and egui. The same
 deterministic engine and interface also build as a native desktop app.
+Original industrial-electronic sound effects provide optional gameplay and
+menu feedback on both targets.
 
 ## Run the website locally
 
@@ -47,6 +49,7 @@ the browser's local storage.
 - `C` or Left Shift: hold
 - Escape: pause or resume
 - `R`: restart while paused or after game over
+- `M`: mute or unmute sound
 
 The mouse is used only for menus and overlay buttons. Losing focus or hiding
 the browser tab automatically pauses the game and clears held input.
@@ -54,6 +57,10 @@ the browser tab automatically pauses the game and clears held input.
 The web title screen offers an optional Fullscreen action. Reloading or closing
 the page abandons the active run without a confirmation dialog. Ferrofall has
 no accounts, analytics, cookies, service worker, or remote telemetry.
+
+The speaker control opens a master sound-effects volume slider. Volume and mute
+state are stored locally on both web and native builds. Audio starts only after
+player interaction and never blocks gameplay when output is unavailable.
 
 ## Gameplay
 
@@ -71,14 +78,20 @@ See [DESIGN.md](DESIGN.md) for the complete rules and architecture.
 
 ```sh
 cargo fmt --check
-cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 cargo check --target wasm32-unknown-unknown
 trunk build --release
 npm ci
 npx playwright install chromium
 npm run test:web
+python3 tools/generate_audio.py --check
 ```
+
+Run `cargo run --features audio-lab` to open the development-only soundboard.
+It previews individual cues, pitch and pan variants, and compound scoring
+events. Regenerate the original WAV bank with
+`python3 tools/generate_audio.py`.
 
 The GitHub Actions workflow runs native quality gates, builds the release
 WebAssembly bundle, and exercises it in headless Chromium. Successful pushes
@@ -92,5 +105,7 @@ at your option. See [LICENSE-MIT](LICENSE-MIT) and
 [LICENSE-APACHE](LICENSE-APACHE).
 
 The source licenses do not grant rights to the Ferrofall name or branding.
+Generated sound effects in `assets/audio` are separately dedicated to the
+public domain under CC0 1.0.
 
 [trunk]: https://trunk-rs.github.io/trunk/

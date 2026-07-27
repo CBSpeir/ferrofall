@@ -6,6 +6,8 @@ use eframe::egui::{
 };
 use web_time::Instant;
 
+#[cfg(feature = "audio-lab")]
+use crate::audio::{CompoundPreview, Cue};
 use crate::game::{
     BOARD_HEIGHT, BOARD_WIDTH, Game, GameEvent, Point, Tetromino, VISIBLE_HEIGHT, VISIBLE_TOP,
     preview_offsets,
@@ -31,7 +33,7 @@ pub(crate) enum Screen {
     GameOver,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum UiAction {
     None,
     Play,
@@ -41,6 +43,32 @@ pub(crate) enum UiAction {
     Resume,
     Restart,
     MainMenu,
+    ToggleAudioControls,
+    ToggleMute,
+    SetAudioVolume(f32),
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct AudioUiState<'a> {
+    pub(crate) volume: f32,
+    pub(crate) muted: bool,
+    pub(crate) available: bool,
+    pub(crate) controls_open: bool,
+    pub(crate) notice: Option<&'a str>,
+    pub(crate) failure_reason: Option<&'a str>,
+}
+
+#[cfg(feature = "audio-lab")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum AudioLabAction {
+    None,
+    Preview(Cue),
+    PreviewCompound(CompoundPreview),
+    Stop,
+    ToggleMute,
+    SetVolume(f32),
+    SetRate(f32),
+    SetPan(f32),
 }
 
 #[derive(Default)]
@@ -72,7 +100,13 @@ impl VisualEffects {
                 to: *to,
                 started: now,
             }),
-            GameEvent::PieceLocked | GameEvent::LevelChanged(_) | GameEvent::GameOver => {}
+            GameEvent::Moved { .. }
+            | GameEvent::Rotated { .. }
+            | GameEvent::Held
+            | GameEvent::Grounded { .. }
+            | GameEvent::PieceLocked { .. }
+            | GameEvent::LevelChanged(_)
+            | GameEvent::GameOver => {}
         }
     }
 
@@ -100,12 +134,13 @@ pub(crate) fn show(
     session_best: u64,
     effects: &VisualEffects,
     now: Instant,
+    audio: AudioUiState<'_>,
 ) -> UiAction {
     let rect = ui.max_rect();
     ui.painter().rect_filled(rect, 0.0, BACKGROUND);
     paint_background_grid(ui.painter(), rect);
 
-    match screen {
+    let action = match screen {
         Screen::Title => show_title(ui, rect),
         Screen::Playing | Screen::Paused | Screen::GameOver => {
             let Some(game) = game else {
@@ -113,6 +148,13 @@ pub(crate) fn show(
             };
             show_game(ui, rect, game, session_best, effects, now, screen)
         }
+    };
+
+    let audio_action = show_audio_control(ui, rect, screen, audio);
+    if audio_action != UiAction::None {
+        audio_action
+    } else {
+        action
     }
 }
 
@@ -150,6 +192,124 @@ pub(crate) fn show_browser_support_issue(ui: &mut egui::Ui, issue: BrowserSuppor
     );
 }
 
+#[cfg(feature = "audio-lab")]
+pub(crate) fn show_audio_lab(
+    ui: &mut egui::Ui,
+    audio: AudioUiState<'_>,
+    rate: f32,
+    pan: f32,
+) -> AudioLabAction {
+    let rect = ui.max_rect();
+    ui.painter().rect_filled(rect, 0.0, BACKGROUND);
+    paint_background_grid(ui.painter(), rect);
+    let mut action = AudioLabAction::None;
+    let mut volume = audio.volume;
+    let mut preview_rate = rate;
+    let mut preview_pan = pan;
+
+    ui.vertical_centered(|ui| {
+        ui.add_space(22.0);
+        ui.label(
+            RichText::new("FERROFALL AUDIO LAB")
+                .font(display_font(30.0))
+                .color(TEXT),
+        );
+        ui.label(
+            RichText::new("Development-only cue and compound-event auditioning")
+                .font(label_font(11.0))
+                .color(MUTED),
+        );
+        ui.add_space(14.0);
+
+        if !audio.available {
+            ui.label(
+                RichText::new(audio.failure_reason.unwrap_or("Audio output unavailable"))
+                    .font(label_font(11.0))
+                    .color(AMBER),
+            );
+        }
+
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("VOLUME").font(label_font(10.0)).color(MUTED));
+            if ui
+                .add(egui::Slider::new(&mut volume, 0.0..=1.0).show_value(true))
+                .changed()
+            {
+                action = AudioLabAction::SetVolume(volume);
+            }
+            if ui
+                .button(if audio.muted {
+                    "UNMUTE (M)"
+                } else {
+                    "MUTE (M)"
+                })
+                .clicked()
+            {
+                action = AudioLabAction::ToggleMute;
+            }
+            if ui.button("STOP ALL").clicked() {
+                action = AudioLabAction::Stop;
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("RATE").font(label_font(10.0)).color(MUTED));
+            if ui
+                .add(egui::Slider::new(&mut preview_rate, 0.75..=1.25).show_value(true))
+                .changed()
+            {
+                action = AudioLabAction::SetRate(preview_rate);
+            }
+            ui.label(RichText::new("PAN").font(label_font(10.0)).color(MUTED));
+            if ui
+                .add(egui::Slider::new(&mut preview_pan, -0.35..=0.35).show_value(true))
+                .changed()
+            {
+                action = AudioLabAction::SetPan(preview_pan);
+            }
+        });
+        ui.add_space(12.0);
+
+        egui::Grid::new("audio_lab_cues")
+            .num_columns(4)
+            .spacing(vec2(8.0, 8.0))
+            .show(ui, |ui| {
+                for (index, cue) in Cue::ALL.into_iter().enumerate() {
+                    if ui
+                        .add_sized(
+                            vec2(145.0, 30.0),
+                            egui::Button::new(RichText::new(cue.label()).font(label_font(10.0))),
+                        )
+                        .clicked()
+                    {
+                        action = AudioLabAction::Preview(cue);
+                    }
+                    if index % 4 == 3 {
+                        ui.end_row();
+                    }
+                }
+            });
+        ui.add_space(12.0);
+        ui.label(
+            RichText::new("COMPOUND EVENTS")
+                .font(label_font(11.0))
+                .color(MUTED),
+        );
+        ui.horizontal(|ui| {
+            if ui.button("HARD DROP + T-SPIN COMBO").clicked() {
+                action = AudioLabAction::PreviewCompound(CompoundPreview::TSpinCombo);
+            }
+            if ui.button("PERFECT FOUR + LEVEL").clicked() {
+                action = AudioLabAction::PreviewCompound(CompoundPreview::PerfectFour);
+            }
+            if ui.button("GAME OVER + NEW BEST").clicked() {
+                action = AudioLabAction::PreviewCompound(CompoundPreview::NewBest);
+            }
+        });
+    });
+
+    action
+}
+
 fn show_title(ui: &mut egui::Ui, rect: Rect) -> UiAction {
     let painter = ui.painter().clone();
     let center = rect.center();
@@ -175,7 +335,7 @@ fn show_title(ui: &mut egui::Ui, rect: Rect) -> UiAction {
     painter.text(
         pos2(center.x, secondary_rect.bottom() + 38.0),
         Align2::CENTER_TOP,
-        "ENTER  PLAY    ·    ESC  PAUSE    ·    R  RESTART",
+        "ENTER  PLAY    ·    ESC  PAUSE    ·    R  RESTART    ·    M  MUTE",
         label_font(12.0),
         MUTED,
     );
@@ -591,6 +751,7 @@ fn paint_controls(painter: &Painter, rect: Rect) {
         ("SPACE", "HARD DROP"),
         ("C", "HOLD"),
         ("ESC", "PAUSE"),
+        ("M", "MUTE"),
     ];
     let segment = rect.width() / controls.len() as f32;
     for (index, (key, label)) in controls.into_iter().enumerate() {
@@ -617,6 +778,218 @@ fn paint_controls(painter: &Painter, rect: Rect) {
             label,
             label_font(8.5),
             MUTED,
+        );
+    }
+}
+
+fn show_audio_control(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    screen: Screen,
+    audio: AudioUiState<'_>,
+) -> UiAction {
+    let button_rect = match screen {
+        Screen::Title => Rect::from_min_size(
+            pos2(rect.right() - 62.0, rect.top() + 24.0),
+            vec2(38.0, 34.0),
+        ),
+        Screen::Playing | Screen::Paused | Screen::GameOver => {
+            let header = GameLayout::new(rect).header;
+            Rect::from_min_size(pos2(header.right() - 84.0, header.top()), vec2(38.0, 34.0))
+        }
+    };
+    let response = ui
+        .interact(
+            button_rect,
+            ui.make_persistent_id("audio_control_button"),
+            if audio.available {
+                egui::Sense::click()
+            } else {
+                egui::Sense::hover()
+            },
+        )
+        .on_hover_text(if audio.available {
+            if audio.muted {
+                "Sound muted (M)"
+            } else {
+                "Sound volume (M to mute)"
+            }
+        } else {
+            audio.failure_reason.unwrap_or("Sound unavailable")
+        });
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            audio.available,
+            if audio.muted {
+                "Sound muted"
+            } else {
+                "Sound volume"
+            },
+        )
+    });
+
+    let fill = if response.is_pointer_button_down_on() {
+        Color32::from_rgb(25, 42, 53)
+    } else if response.hovered() && audio.available {
+        Color32::from_rgb(18, 34, 45)
+    } else {
+        SURFACE_DEEP
+    };
+    ui.painter().rect_filled(button_rect, 2.0, fill);
+    ui.painter().rect_stroke(
+        button_rect,
+        2.0,
+        Stroke::new(1.0, if audio.available { BORDER } else { GRID }),
+        StrokeKind::Inside,
+    );
+    paint_speaker_icon(
+        ui.painter(),
+        button_rect,
+        audio.muted || audio.volume <= 0.0,
+        if audio.available { TEXT } else { MUTED },
+    );
+
+    if let Some(notice) = audio.notice {
+        let notice_rect =
+            Rect::from_center_size(pos2(rect.center().x, rect.top() + 42.0), vec2(190.0, 30.0));
+        ui.painter().rect_filled(notice_rect, 2.0, SURFACE);
+        ui.painter().rect_stroke(
+            notice_rect,
+            2.0,
+            Stroke::new(1.0, BORDER),
+            StrokeKind::Inside,
+        );
+        ui.painter().text(
+            notice_rect.center(),
+            Align2::CENTER_CENTER,
+            notice,
+            label_font(11.0),
+            TEXT,
+        );
+    }
+
+    if response.clicked() && audio.available {
+        return UiAction::ToggleAudioControls;
+    }
+    if !audio.controls_open || !audio.available {
+        return UiAction::None;
+    }
+
+    let panel = Rect::from_min_size(
+        pos2(button_rect.right() - 270.0, button_rect.bottom() + 8.0),
+        vec2(270.0, 100.0),
+    );
+    ui.painter().rect_filled(panel, 3.0, SURFACE);
+    ui.painter()
+        .rect_stroke(panel, 3.0, Stroke::new(1.0, BORDER), StrokeKind::Inside);
+    ui.painter().text(
+        pos2(panel.left() + 14.0, panel.top() + 14.0),
+        Align2::LEFT_TOP,
+        "SOUND",
+        label_font(11.0),
+        MUTED,
+    );
+    ui.painter().text(
+        pos2(panel.right() - 14.0, panel.top() + 14.0),
+        Align2::RIGHT_TOP,
+        format!("{}%", (audio.volume * 100.0).round() as u32),
+        label_font(11.0),
+        TEXT,
+    );
+
+    let mut volume = audio.volume;
+    let slider_rect = Rect::from_min_size(
+        pos2(panel.left() + 14.0, panel.top() + 38.0),
+        vec2(120.0, 30.0),
+    );
+    let slider = ui
+        .push_id("audio_volume_slider", |ui| {
+            ui.put(
+                slider_rect,
+                egui::Slider::new(&mut volume, 0.0..=1.0).show_value(false),
+            )
+        })
+        .inner;
+    let mute_rect = Rect::from_min_size(
+        pos2(panel.right() - 122.0, panel.top() + 40.0),
+        vec2(108.0, 26.0),
+    );
+    let mute = ui
+        .push_id("audio_mute_button", |ui| {
+            styled_button(
+                ui,
+                mute_rect,
+                if audio.muted { "UNMUTE" } else { "MUTE" },
+                false,
+            )
+        })
+        .inner;
+    ui.painter().text(
+        pos2(panel.left() + 14.0, panel.bottom() - 13.0),
+        Align2::LEFT_BOTTOM,
+        "M toggles mute",
+        label_font(9.0),
+        MUTED,
+    );
+
+    if slider.changed() {
+        UiAction::SetAudioVolume(volume)
+    } else if mute {
+        UiAction::ToggleMute
+    } else {
+        UiAction::None
+    }
+}
+
+fn paint_speaker_icon(painter: &Painter, rect: Rect, muted: bool, color: Color32) {
+    let center = rect.center();
+    let body = Rect::from_center_size(pos2(center.x - 5.5, center.y), vec2(5.0, 8.0));
+    painter.rect_filled(body, 0.0, color);
+    painter.line_segment(
+        [body.right_top(), pos2(center.x + 1.0, center.y - 6.0)],
+        Stroke::new(1.5, color),
+    );
+    painter.line_segment(
+        [body.right_bottom(), pos2(center.x + 1.0, center.y + 6.0)],
+        Stroke::new(1.5, color),
+    );
+    painter.line_segment(
+        [
+            pos2(center.x + 1.0, center.y - 6.0),
+            pos2(center.x + 1.0, center.y + 6.0),
+        ],
+        Stroke::new(1.5, color),
+    );
+    if muted {
+        painter.line_segment(
+            [
+                pos2(center.x + 5.0, center.y - 5.0),
+                pos2(center.x + 12.0, center.y + 5.0),
+            ],
+            Stroke::new(1.5, AMBER),
+        );
+        painter.line_segment(
+            [
+                pos2(center.x + 12.0, center.y - 5.0),
+                pos2(center.x + 5.0, center.y + 5.0),
+            ],
+            Stroke::new(1.5, AMBER),
+        );
+    } else {
+        painter.line_segment(
+            [
+                pos2(center.x + 5.0, center.y - 4.0),
+                pos2(center.x + 8.0, center.y),
+            ],
+            Stroke::new(1.3, color),
+        );
+        painter.line_segment(
+            [
+                pos2(center.x + 8.0, center.y),
+                pos2(center.x + 5.0, center.y + 4.0),
+            ],
+            Stroke::new(1.3, color),
         );
     }
 }
@@ -861,6 +1234,14 @@ mod tests {
                     0,
                     &VisualEffects::default(),
                     Instant::now(),
+                    AudioUiState {
+                        volume: 0.7,
+                        muted: false,
+                        available: true,
+                        controls_open: false,
+                        notice: None,
+                        failure_reason: None,
+                    },
                 );
             },
         );

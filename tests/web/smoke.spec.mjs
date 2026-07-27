@@ -19,6 +19,16 @@ test("loads the title screen and starts a game", async ({ page }) => {
 
   await expect(canvas).toHaveAttribute("data-screen", "playing");
   await expect(page.locator("#app_status")).toContainText("game in progress");
+  await page.waitForFunction(() => {
+    const state = window.ferrofallAudioDebugState?.();
+    return state?.available && state.ready && state.contextState === "running";
+  });
+
+  await page.keyboard.press("m");
+  await expect(page.locator("#app_status")).toContainText("SOUND MUTED");
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("ferrofall.audio-muted.v1")))
+    .toBe("true");
   expect(browserErrors).toEqual([]);
 });
 

@@ -22,13 +22,13 @@ The web-primary milestone includes:
 - a full-viewport web shell with loading and unsupported-device states;
 - automated WebAssembly build and Chromium smoke tests;
 - GitHub Pages deployment; and
-- deterministic engine tests and native macOS verification.
+- deterministic engine tests and native macOS verification; and
+- original sound effects with local volume and mute preferences.
 
 The milestone excludes:
 
-- audio;
 - native persistent scores or window state;
-- settings and control remapping;
+- general settings and control remapping;
 - alternate themes;
 - multiplayer;
 - replay files or visible random seeds;
@@ -63,6 +63,8 @@ The source is divided by responsibility:
 - `main.rs` configures the native window and generated icon;
 - `main.rs` also starts `eframe::WebRunner` in browser builds;
 - `app.rs` owns screens, focus, wall-clock accumulation, and key mapping;
+- `audio.rs` owns event-to-cue mapping, mixing, and the platform playback
+  boundary;
 - `platform.rs` isolates browser storage, support checks, accessible status,
   and fullscreen behavior;
 - `ui.rs` owns layout, painting, overlays, and visual effects;
@@ -71,6 +73,8 @@ The source is divided by responsibility:
 - `game/piece.rs` owns tetromino geometry and SRS data;
 - `game/randomizer.rs` owns the seeded seven-bag;
 - `game/scoring.rs` owns score, line, combo, and level progression;
+- `assets/audio` contains generated mono WAV effects and `assets/audio.js`
+  supplies browser Web Audio playback;
 - `index.html` owns the static full-viewport shell and branded loader; and
 - `Trunk.toml` and `.github/workflows/web.yml` own packaging, browser smoke
   tests, and Pages deployment.
@@ -287,13 +291,65 @@ Hiding the browser tab follows the same rule. Reloading, closing, or navigating
 away abandons the current run without a confirmation prompt. In-progress game
 state is never serialized.
 
-The web build stores only the best score in same-origin `localStorage`. It uses
-a versioned key, tolerates unavailable or malformed storage, and has no account
+The web build stores its best score in same-origin `localStorage`. It uses a
+versioned key, tolerates unavailable or malformed storage, and has no account
 or server synchronization. The native build retains a session-only best score.
+Both targets persist only the master sound volume and mute preference through
+eframe storage. No game state is persisted.
 
 The web shell keeps a visually hidden semantic status synchronized with the
 canvas screen so assistive technology and browser smoke tests can identify the
 current high-level state.
+
+## Audio system
+
+Audio is a presentation effect and never changes deterministic simulation
+state. Successful engine actions emit typed events for movement, rotation,
+hold, first ground contact, hard drop, lock, clears, level changes, and game
+over. Failed movement and rotation attempts emit no event. The app drains each
+simulation step as a batch so the mixer can prioritize simultaneous cues.
+
+The sound bank has a restrained industrial-electronic character. Original
+mono, 16-bit, 32-kHz WAV files are generated deterministically by
+`tools/generate_audio.py`. The checked-in effects are licensed under CC0 1.0;
+the generator follows the repository's source-code license. The complete bank
+must remain below 750 KiB uncompressed.
+
+The mix follows these rules:
+
+- successful horizontal moves alternate between two quiet ticks, with small
+  pitch differences for left and right;
+- rotation, hold, first ground contact, hard drop, and lock have distinct cues;
+- automatic gravity and individual soft-drop rows are silent;
+- a clear replaces the ordinary lock cue while a hard-drop layer may remain;
+- single, double, triple, and four-line clears escalate;
+- T-spins, combos, back-to-back bonuses, and perfect clears add restrained
+  accents;
+- level-up pitch rises slightly, with an extra layer every five levels;
+- ordinary game over uses a power-down cue, and a new best adds a flourish;
+- board-position panning is limited to a narrow stereo range; and
+- no more than 16 voices may play simultaneously.
+
+The master sound-effects volume defaults to 70 percent. A speaker control is
+available on title and game screens, including during active play. It opens an
+inline volume slider and mute button. `M` toggles mute globally and produces a
+short visual and accessible status confirmation. Audio never carries gameplay
+information that is absent visually.
+
+Intentional pause and resume have short cues. Pausing stops active sounds.
+Focus loss, page hiding, and unsupported viewport transitions stop sounds
+without playing a pause cue; returning focus never resumes either gameplay or
+audio automatically.
+
+Native playback uses Kira with predecoded static sounds. The web shell
+prefetches the same files and uses Web Audio, unlocking its context on the
+first pointer or keyboard gesture. Initialization, decoding, device, and
+playback errors are nonfatal: the game continues silently and disables the
+sound control when the platform reports audio as unavailable.
+
+The non-default `audio-lab` Cargo feature replaces the game UI with a
+development soundboard. It previews every cue, rate and pan variations, and
+representative compound events. Release builds do not enable this feature.
 
 ## Visual system
 
@@ -333,6 +389,7 @@ Accessibility requirements include:
 - scalable logical-point layout;
 - a ghost distinguished by both outline and opacity;
 - per-piece inset marks so color is not the only identifier; and
+- sound used only as reinforcement for visible information; and
 - no rapid flashing effects.
 
 ## Completion bar
@@ -349,6 +406,9 @@ The web-primary milestone is complete only when:
 - title-to-playing interaction and the undersized-viewport gate pass in
   headless Chromium;
 - current Safari and Firefox receive manual launch checks;
+- audio latency, balance, focus behavior, and preference persistence receive
+  manual checks on the web and native macOS;
+- generated audio files match `tools/generate_audio.py --check`;
 - the static bundle works from relative paths suitable for GitHub Pages;
 - formatting, strict Clippy, and tests are clean; and
 - this specification and the README match the implementation.

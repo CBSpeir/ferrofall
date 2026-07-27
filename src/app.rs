@@ -4,12 +4,16 @@ use std::time::Duration;
 use eframe::egui::{self, Event, Key};
 use web_time::Instant;
 
+use crate::audio::{AudioSystem, Cue, DEFAULT_VOLUME};
 use crate::game::{Action, Command, Game, GameConfig};
 use crate::platform;
-use crate::ui::{Screen, UiAction, VisualEffects};
+use crate::ui::{AudioUiState, Screen, UiAction, VisualEffects};
 
 const SIMULATION_STEP: Duration = Duration::from_nanos(1_000_000_000 / 60);
 const MAX_CATCH_UP: Duration = Duration::from_millis(250);
+const AUDIO_NOTICE_DURATION: Duration = Duration::from_millis(1_200);
+const AUDIO_VOLUME_KEY: &str = "ferrofall.audio-volume.v1";
+const AUDIO_MUTED_KEY: &str = "ferrofall.audio-muted.v1";
 
 pub(crate) struct FerrofallApp {
     screen: Screen,
@@ -19,13 +23,33 @@ pub(crate) struct FerrofallApp {
     accumulator: Duration,
     pressed_keys: BTreeSet<Key>,
     effects: VisualEffects,
+    audio: AudioSystem,
+    audio_controls_open: bool,
+    audio_notice: Option<(String, Instant)>,
+    #[cfg(feature = "audio-lab")]
+    audio_lab_enabled: bool,
+    #[cfg(feature = "audio-lab")]
+    audio_lab_rate: f32,
+    #[cfg(feature = "audio-lab")]
+    audio_lab_pan: f32,
     accessible_status: String,
 }
 
 impl FerrofallApp {
     pub(crate) fn new(context: &eframe::CreationContext<'_>) -> Self {
         configure_egui(&context.egui_ctx);
-        let app = Self::initial_state();
+        let volume = context
+            .storage
+            .and_then(|storage| storage.get_string(AUDIO_VOLUME_KEY))
+            .and_then(|volume| volume.parse::<f32>().ok())
+            .filter(|volume| volume.is_finite())
+            .unwrap_or(DEFAULT_VOLUME)
+            .clamp(0.0, 1.0);
+        let muted = context
+            .storage
+            .and_then(|storage| storage.get_string(AUDIO_MUTED_KEY))
+            .is_some_and(|muted| muted == "true");
+        let app = Self::initial_state_with_audio(volume, muted);
 
         #[cfg(feature = "qa-screenshot")]
         {
@@ -40,7 +64,12 @@ impl FerrofallApp {
         app
     }
 
+    #[cfg(test)]
     fn initial_state() -> Self {
+        Self::initial_state_with_audio(DEFAULT_VOLUME, false)
+    }
+
+    fn initial_state_with_audio(volume: f32, muted: bool) -> Self {
         Self {
             screen: Screen::Title,
             game: None,
@@ -49,6 +78,15 @@ impl FerrofallApp {
             accumulator: Duration::ZERO,
             pressed_keys: BTreeSet::new(),
             effects: VisualEffects::default(),
+            audio: AudioSystem::new(volume, muted),
+            audio_controls_open: false,
+            audio_notice: None,
+            #[cfg(feature = "audio-lab")]
+            audio_lab_enabled: true,
+            #[cfg(feature = "audio-lab")]
+            audio_lab_rate: 1.0,
+            #[cfg(feature = "audio-lab")]
+            audio_lab_pan: 0.0,
             accessible_status: String::new(),
         }
     }
@@ -90,6 +128,10 @@ impl FerrofallApp {
     }
 
     fn start_game(&mut self) {
+        self.audio.activate();
+        self.audio.stop_all();
+        self.audio.play_ui(Cue::GameStart);
+        self.audio_controls_open = false;
         let seed = rand::random::<u64>();
         self.game = Some(Game::new(GameConfig::default(), seed));
         self.screen = Screen::Playing;
@@ -99,16 +141,20 @@ impl FerrofallApp {
         self.effects.clear();
     }
 
-    fn pause(&mut self) {
+    fn pause(&mut self, intentional: bool) {
         if self.screen == Screen::Playing {
             self.screen = Screen::Paused;
             self.clear_gameplay_input();
+            self.audio.stop_all();
+            if intentional {
+                self.audio.play_ui(Cue::Pause);
+            }
         }
     }
 
     fn handle_focus(&mut self, focused: bool) {
         if !focused && self.screen == Screen::Playing {
-            self.pause();
+            self.pause(false);
         }
     }
 
@@ -118,6 +164,7 @@ impl FerrofallApp {
             self.last_frame = Instant::now();
             self.accumulator = Duration::ZERO;
             self.pressed_keys.clear();
+            self.audio.play_ui(Cue::Resume);
         }
     }
 
@@ -128,6 +175,7 @@ impl FerrofallApp {
         self.accumulator = Duration::ZERO;
         self.pressed_keys.clear();
         self.effects.clear();
+        self.audio.stop_all();
     }
 
     fn clear_gameplay_input(&mut self) {
@@ -194,13 +242,17 @@ impl FerrofallApp {
     }
 
     fn handle_screen_key(&mut self, key: Key) -> bool {
+        if key == Key::M {
+            self.toggle_mute();
+            return true;
+        }
         match (self.screen, key) {
             (Screen::Title, Key::Enter) => {
                 self.start_game();
                 true
             }
             (Screen::Playing, Key::Escape) => {
-                self.pause();
+                self.pause(true);
                 true
             }
             (Screen::Paused, Key::Escape) => {
@@ -241,19 +293,23 @@ impl FerrofallApp {
         self.accumulator += delta;
 
         while self.accumulator >= SIMULATION_STEP {
-            let Some(game) = self.game.as_mut() else {
-                break;
+            let (events, game_over, score) = {
+                let Some(game) = self.game.as_mut() else {
+                    break;
+                };
+                game.step();
+                let events = game.drain_events().collect::<Vec<_>>();
+                (events, game.is_game_over(), game.score())
             };
-            game.step();
             self.accumulator -= SIMULATION_STEP;
 
-            let events = game.drain_events().collect::<Vec<_>>();
-            for event in events {
-                self.effects.observe(&event, now);
+            let new_best = game_over && score > self.session_best;
+            self.audio.observe_game_events(&events, new_best);
+            for event in &events {
+                self.effects.observe(event, now);
             }
 
-            if game.is_game_over() {
-                let score = game.score();
+            if game_over {
                 self.record_best_score(score);
                 self.screen = Screen::GameOver;
                 self.clear_gameplay_input();
@@ -267,13 +323,86 @@ impl FerrofallApp {
         match action {
             UiAction::None => {}
             UiAction::Play | UiAction::Restart => self.start_game(),
-            UiAction::Pause => self.pause(),
+            UiAction::Pause => self.pause(true),
             UiAction::Resume => self.resume(),
-            UiAction::MainMenu => self.return_to_title(),
-            UiAction::Quit => context.send_viewport_cmd(egui::ViewportCommand::Close),
-            UiAction::Fullscreen => platform::toggle_fullscreen(context),
+            UiAction::MainMenu => {
+                self.audio.play_ui(Cue::UiActivate);
+                self.return_to_title();
+            }
+            UiAction::Quit => {
+                self.audio.play_ui(Cue::UiActivate);
+                context.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            UiAction::Fullscreen => {
+                self.audio.activate();
+                self.audio.play_ui(Cue::UiActivate);
+                platform::toggle_fullscreen(context);
+            }
+            UiAction::ToggleAudioControls => {
+                self.audio.activate();
+                self.audio.play_ui(Cue::UiActivate);
+                self.audio_controls_open = !self.audio_controls_open;
+            }
+            UiAction::ToggleMute => self.toggle_mute(),
+            UiAction::SetAudioVolume(volume) => {
+                self.audio.activate();
+                self.audio.set_volume(volume);
+                self.set_audio_notice(format!(
+                    "SOUND {}%",
+                    (self.audio.volume() * 100.0).round() as u32
+                ));
+            }
         }
         context.request_repaint();
+    }
+
+    fn toggle_mute(&mut self) {
+        self.audio.activate();
+        self.audio.toggle_muted();
+        self.set_audio_notice(if self.audio.is_muted() {
+            "SOUND MUTED".to_owned()
+        } else {
+            "SOUND ON".to_owned()
+        });
+    }
+
+    fn set_audio_notice(&mut self, message: String) {
+        self.audio_notice = Some((message, Instant::now()));
+    }
+
+    fn active_audio_notice(&mut self, now: Instant) -> Option<&str> {
+        if self
+            .audio_notice
+            .as_ref()
+            .is_some_and(|(_, started)| now.duration_since(*started) >= AUDIO_NOTICE_DURATION)
+        {
+            self.audio_notice = None;
+        }
+        self.audio_notice
+            .as_ref()
+            .map(|(message, _)| message.as_str())
+    }
+
+    #[cfg(feature = "audio-lab")]
+    fn handle_audio_lab_action(&mut self, action: crate::ui::AudioLabAction) {
+        use crate::ui::AudioLabAction;
+
+        match action {
+            AudioLabAction::None => {}
+            AudioLabAction::Preview(cue) => {
+                self.audio
+                    .preview(cue, self.audio_lab_rate, self.audio_lab_pan);
+            }
+            AudioLabAction::PreviewCompound(compound) => {
+                self.audio
+                    .preview_compound(compound, self.audio_lab_rate, self.audio_lab_pan);
+            }
+            AudioLabAction::Stop => self.audio.stop_all(),
+            AudioLabAction::ToggleMute => self.toggle_mute(),
+            AudioLabAction::SetVolume(volume) => self.audio.set_volume(volume),
+            AudioLabAction::SetRate(rate) => self.audio_lab_rate = rate,
+            AudioLabAction::SetPan(pan) => self.audio_lab_pan = pan,
+        }
     }
 }
 
@@ -308,15 +437,35 @@ impl eframe::App for FerrofallApp {
 
         self.advance_game(now);
         self.effects.retain_active(now);
+        let audio_notice_active = self.active_audio_notice(now).is_some();
 
-        if self.screen == Screen::Playing || self.effects.is_active() {
+        if self.screen == Screen::Playing || self.effects.is_active() || audio_notice_active {
             context.request_repaint_after(SIMULATION_STEP);
         }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        #[cfg(feature = "audio-lab")]
+        if self.audio_lab_enabled {
+            let action = crate::ui::show_audio_lab(
+                ui,
+                AudioUiState {
+                    volume: self.audio.volume(),
+                    muted: self.audio.is_muted(),
+                    available: self.audio.is_available(),
+                    controls_open: false,
+                    notice: None,
+                    failure_reason: self.audio.failure_reason(),
+                },
+                self.audio_lab_rate,
+                self.audio_lab_pan,
+            );
+            self.handle_audio_lab_action(action);
+            return;
+        }
+
         if let Some(issue) = platform::browser_support_issue(ui.max_rect().size()) {
-            self.pause();
+            self.pause(false);
             let (screen, status) = match issue {
                 platform::BrowserSupportIssue::TouchOnly => (
                     "unsupported-device",
@@ -332,7 +481,9 @@ impl eframe::App for FerrofallApp {
             return;
         }
 
-        let (screen, status) = match self.screen {
+        let now = Instant::now();
+        let audio_notice = self.active_audio_notice(now).map(str::to_owned);
+        let (screen, mut status) = match self.screen {
             Screen::Title => (
                 "title",
                 "Ferrofall title screen. Press Enter or choose Play to begin.".to_owned(),
@@ -353,6 +504,14 @@ impl eframe::App for FerrofallApp {
                 )
             }
         };
+        if let Some(notice) = &audio_notice {
+            status.push(' ');
+            status.push_str(notice);
+            status.push('.');
+        }
+        if !self.audio.is_available() {
+            status.push_str(" Sound is unavailable; gameplay continues silently.");
+        }
         self.set_accessible_status(screen, status);
 
         let action = crate::ui::show(
@@ -361,7 +520,15 @@ impl eframe::App for FerrofallApp {
             self.game.as_ref(),
             self.session_best,
             &self.effects,
-            Instant::now(),
+            now,
+            AudioUiState {
+                volume: self.audio.volume(),
+                muted: self.audio.is_muted(),
+                available: self.audio.is_available(),
+                controls_open: self.audio_controls_open,
+                notice: audio_notice.as_deref(),
+                failure_reason: self.audio.failure_reason(),
+            },
         );
         self.handle_ui_action(action, ui.ctx());
     }
@@ -372,6 +539,15 @@ impl eframe::App for FerrofallApp {
 
     fn persist_egui_memory(&self) -> bool {
         false
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        storage.set_string(AUDIO_VOLUME_KEY, self.audio.volume().to_string());
+        storage.set_string(AUDIO_MUTED_KEY, self.audio.is_muted().to_string());
+    }
+
+    fn auto_save_interval(&self) -> Duration {
+        Duration::from_secs(1)
     }
 }
 
@@ -408,6 +584,27 @@ fn configure_egui(context: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use eframe::Storage as _;
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct MemoryStorage(HashMap<String, String>);
+
+    impl eframe::Storage for MemoryStorage {
+        fn get_string(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
+
+        fn set_string(&mut self, key: &str, value: String) {
+            self.0.insert(key.to_owned(), value);
+        }
+
+        fn remove_string(&mut self, key: &str) {
+            self.0.remove(key);
+        }
+
+        fn flush(&mut self) {}
+    }
 
     #[test]
     fn title_play_movement_focus_pause_and_resume_form_a_complete_path() {
@@ -468,5 +665,38 @@ mod tests {
 
         app.record_best_score(1_000);
         assert_eq!(app.session_best, 12_345);
+    }
+
+    #[test]
+    fn mute_key_is_global_and_never_maps_to_gameplay() {
+        let mut app = FerrofallApp::initial_state();
+        assert!(!app.audio.is_muted());
+
+        assert!(app.handle_screen_key(Key::M));
+        assert!(app.audio.is_muted());
+        assert_eq!(key_to_action(Key::M), None);
+
+        assert!(app.handle_screen_key(Key::M));
+        assert!(!app.audio.is_muted());
+    }
+
+    #[test]
+    fn audio_preferences_restore_and_save_through_eframe_storage() {
+        let mut stored = MemoryStorage::default();
+        stored.set_string(AUDIO_VOLUME_KEY, "0.42".to_owned());
+        stored.set_string(AUDIO_MUTED_KEY, "true".to_owned());
+        let mut creation = eframe::CreationContext::_new_kittest(egui::Context::default());
+        creation.storage = Some(&stored);
+        let mut app = FerrofallApp::new(&creation);
+
+        assert!((app.audio.volume() - 0.42).abs() < f32::EPSILON);
+        assert!(app.audio.is_muted());
+
+        app.audio.set_volume(0.81);
+        app.audio.set_muted(false);
+        let mut saved = MemoryStorage::default();
+        eframe::App::save(&mut app, &mut saved);
+        assert_eq!(saved.get_string(AUDIO_VOLUME_KEY).as_deref(), Some("0.81"));
+        assert_eq!(saved.get_string(AUDIO_MUTED_KEY).as_deref(), Some("false"));
     }
 }
