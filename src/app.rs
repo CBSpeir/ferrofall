@@ -14,6 +14,7 @@ use crate::ui::{
 const SIMULATION_STEP: Duration = Duration::from_nanos(1_000_000_000 / 60);
 const MAX_CATCH_UP: Duration = Duration::from_millis(250);
 const AUDIO_NOTICE_DURATION: Duration = Duration::from_millis(1_200);
+const TOUCH_CLICK_ECHO_WINDOW: Duration = Duration::from_millis(250);
 const AUDIO_VOLUME_KEY: &str = "ferrofall.audio-volume.v1";
 const AUDIO_MUTED_KEY: &str = "ferrofall.audio-muted.v1";
 
@@ -56,6 +57,14 @@ impl TouchBinding {
             Self::ReleaseAction { armed: false, .. } | Self::Ignored => None,
         }
     }
+
+    fn click_action(self) -> Option<TouchControlAction> {
+        match self {
+            Self::Held(action) => action,
+            Self::Immediate(action) | Self::ReleaseAction { action, .. } => Some(action),
+            Self::Ignored => None,
+        }
+    }
 }
 
 pub(crate) struct FerrofallApp {
@@ -68,6 +77,7 @@ pub(crate) struct FerrofallApp {
     touch_contacts: BTreeMap<TouchId, TouchBinding>,
     touch_mode: bool,
     touch_event_this_frame: bool,
+    touch_click_guard: Option<(TouchControlAction, Instant)>,
     viewport_orientation: Option<ViewportOrientation>,
     effects: VisualEffects,
     audio: AudioSystem,
@@ -127,6 +137,7 @@ impl FerrofallApp {
             touch_contacts: BTreeMap::new(),
             touch_mode: platform::prefers_touch_controls(),
             touch_event_this_frame: false,
+            touch_click_guard: None,
             viewport_orientation: None,
             effects: VisualEffects::default(),
             audio: AudioSystem::new(volume, muted),
@@ -411,6 +422,11 @@ impl FerrofallApp {
         let Some(binding) = self.touch_contacts.remove(&id) else {
             return;
         };
+        if phase == TouchPhase::End
+            && let Some(action) = binding.click_action()
+        {
+            self.touch_click_guard = Some((action, Instant::now()));
+        }
         match binding {
             TouchBinding::Held(Some(control)) => {
                 let action = touch_to_game_action(control);
@@ -532,6 +548,26 @@ impl FerrofallApp {
         game.apply(Command::Press(action));
         if control.is_held() {
             game.apply(Command::Release(action));
+        }
+    }
+
+    fn handle_control_click(&mut self, control: TouchControlAction, now: Instant) {
+        let guarded = if let Some((guarded_control, touch_ended)) = self.touch_click_guard {
+            if now.duration_since(touch_ended) > TOUCH_CLICK_ECHO_WINDOW {
+                self.touch_click_guard = None;
+                false
+            } else if guarded_control == control {
+                self.touch_click_guard = None;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if !self.touch_event_this_frame && !guarded && self.screen == Screen::Playing {
+            self.activate_control_without_touch(control);
         }
     }
 
@@ -845,11 +881,8 @@ impl eframe::App for FerrofallApp {
             },
         );
         self.handle_ui_action(action, ui.ctx());
-        if !self.touch_event_this_frame
-            && self.screen == Screen::Playing
-            && let Some(control) = control_click
-        {
-            self.activate_control_without_touch(control);
+        if let Some(control) = control_click {
+            self.handle_control_click(control, now);
         }
     }
 
@@ -1146,6 +1179,16 @@ mod tests {
         app.game.as_mut().unwrap().step();
         assert!(
             app.game
+                .as_mut()
+                .unwrap()
+                .drain_events()
+                .any(|event| { matches!(event, crate::game::GameEvent::Rotated { .. }) })
+        );
+        app.touch_event_this_frame = false;
+        app.handle_control_click(TouchControlAction::RotateClockwise, Instant::now());
+        app.game.as_mut().unwrap().step();
+        assert!(
+            !app.game
                 .as_mut()
                 .unwrap()
                 .drain_events()

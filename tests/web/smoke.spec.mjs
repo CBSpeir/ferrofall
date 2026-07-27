@@ -114,6 +114,14 @@ test.describe("mobile touch play", () => {
     await page.touchscreen.tap(180, 339);
     await expect(canvas).toHaveAttribute("data-screen", "playing");
     await expect(canvas).toHaveAttribute("data-touch-controls", "visible");
+    await page.evaluate(() => {
+      const play = window.ferrofallAudioPlay;
+      window.__ferrofallRotationPlays = 0;
+      window.ferrofallAudioPlay = (name, ...args) => {
+        if (name === "rotate") window.__ferrofallRotationPlays += 1;
+        return play(name, ...args);
+      };
+    });
     await expect(page).toHaveScreenshot("phone-portrait-controls.png", {
       animations: "disabled",
       clip: { x: 0, y: 480, width: 360, height: 160 },
@@ -146,6 +154,9 @@ test.describe("mobile touch play", () => {
     await dispatchTouches(client, "touchMove", [clockwise]);
     await expect(canvas).toHaveAttribute("data-touch-active", "");
     await dispatchTouches(client, "touchEnd", []);
+    await expect
+      .poll(() => page.evaluate(() => window.__ferrofallRotationPlays))
+      .toBe(0);
 
     await dispatchTouches(client, "touchStart", [
       center(regions.get("left")),
@@ -157,6 +168,9 @@ test.describe("mobile touch play", () => {
     );
     await dispatchTouches(client, "touchEnd", []);
     await expect(canvas).toHaveAttribute("data-touch-active", "");
+    await expect
+      .poll(() => page.evaluate(() => window.__ferrofallRotationPlays))
+      .toBe(1);
 
     await page.setViewportSize({ width: 640, height: 360 });
     await expect(canvas).toHaveAttribute("data-screen", "paused");
