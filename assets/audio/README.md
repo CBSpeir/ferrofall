@@ -1,19 +1,46 @@
-# Oxidefall sound effects
+# Oxidefall audio assets
 
-These 22 mono, 16-bit, 32-kHz WAV files are original procedural sound effects
-for Oxidefall. They are generated deterministically from the Python standard
-library:
+All audio in this directory is original, procedurally generated material for
+Oxidefall.
+
+## Sound effects
+
+The 22 mono, 16-bit, 32-kHz WAV effects are generated deterministically with
+the Python standard library:
 
 ```sh
 python3 tools/generate_audio.py
-```
-
-Verify that the checked-in bank matches the generator with:
-
-```sh
 python3 tools/generate_audio.py --check
 ```
 
-The complete generated bank is dedicated to the public domain under CC0 1.0.
-See [LICENSE-CC0.txt](LICENSE-CC0.txt). The generator itself is source code and
-uses Oxidefall's MIT-or-Apache-2.0 license.
+## Adaptive music
+
+The three mono, 32-kHz Ogg Vorbis stems form a synchronized 64-bar loop at
+132 BPM:
+
+- `music_base.ogg` supplies the permanent foundation;
+- `music_drive.ogg` enters at level 5 or when danger advances a base-tier run;
+  and
+- `music_pressure.ogg` enters at level 10 or when danger advances a drive-tier
+  run.
+
+The clean-room composition is modal, industrial-electronic, and generated
+without importing or transcribing third-party music. Its source generator,
+musical event data, asset hashes, peak levels, duration, and byte budget are
+recorded by:
+
+```sh
+python3 tools/generate_music.py
+python3 tools/generate_music.py --check
+```
+
+FFmpeg is the preferred Vorbis encoder. When it is unavailable, the generator
+uses the source-built Rust encoder in `tools/music_encoder`. Lossless WAV
+masters are written under `target/music-masters` and are not shipped.
+
+## License
+
+The generated effects, rendered music stems, and composition data are
+dedicated to the public domain under CC0 1.0. See
+[LICENSE-CC0.txt](LICENSE-CC0.txt). Generator and encoder source code use
+Oxidefall's MIT-or-Apache-2.0 license.

@@ -1,0 +1,39 @@
+{
+  "format_version": 1,
+  "sample_rate": 32000,
+  "bpm": 132,
+  "beat_samples": 14545,
+  "bar_samples": 58180,
+  "bars": 64,
+  "total_samples": 3723520,
+  "duration_seconds": 116.36,
+  "budget_bytes": 4194304,
+  "stems": {
+    "music_base": {
+      "master_sha256": "5c1e6b58ca81724453aa6f9d9e42ab62612d846acb9546dd9866023445106e9b",
+      "peak": 0.399002,
+      "rms": 0.090826,
+      "asset": "music_base.ogg",
+      "asset_bytes": 361051,
+      "asset_sha256": "8906c5fb20f6d0e6a2c2066f2e85c4434a9359f8bc87a7dc9136142de275b4fe"
+    },
+    "music_drive": {
+      "master_sha256": "30c3ce78eba018527f8d4c6fce9cc794cf3b05eea57f5745f7b04e6e3bef5375",
+      "peak": 0.330958,
+      "rms": 0.031726,
+      "asset": "music_drive.ogg",
+      "asset_bytes": 619153,
+      "asset_sha256": "3b12571d8111beded50c51948a99613aa3a3264a79090250bc590732f75aec0e"
+    },
+    "music_pressure": {
+      "master_sha256": "e31accef68e1f43fff7712c3f8bbd8b6f76d2f8c4f7a63a50dd0cf2afeb18196",
+      "peak": 0.086537,
+      "rms": 0.009447,
+      "asset": "music_pressure.ogg",
+      "asset_bytes": 674322,
+      "asset_sha256": "269f9d735449d9aac4fe753ff0bac2386b7f240f2ac7127add4a059582eb2201"
+    }
+  },
+  "encoder": "vorbis-rs-quality-vbr-0.35",
+  "total_asset_bytes": 1654526
+}

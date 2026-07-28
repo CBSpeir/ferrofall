@@ -23,8 +23,9 @@ The web-primary milestone includes:
 - responsive portrait and landscape HUDs with multi-touch controls;
 - automated WebAssembly build and Chromium smoke tests;
 - GitHub Pages deployment; and
-- deterministic engine tests and native macOS verification; and
-- original sound effects with local volume and mute preferences.
+- deterministic engine tests and native macOS verification;
+- original sound effects; and
+- an original adaptive score with local music, effects, and mute preferences.
 
 The milestone excludes:
 
@@ -51,7 +52,7 @@ The dependency surface is intentionally small:
 - `rand` supplies fresh production seeds;
 - `rand_chacha` supplies deterministic, portable bag generation;
 - `web-time` supplies an `Instant` implementation that works on both targets;
-  and
+- Kira supplies native static-effect and streaming-music playback; and
 - browser-only dependencies enable JavaScript entropy, startup, DOM access,
   local storage, and fullscreen.
 
@@ -77,8 +78,9 @@ The source is divided by responsibility:
 - `game/piece.rs` owns tetromino geometry and SRS data;
 - `game/randomizer.rs` owns the seeded seven-bag;
 - `game/scoring.rs` owns score, line, combo, and level progression;
-- `assets/audio` contains generated mono WAV effects and `assets/audio.js`
-  supplies browser Web Audio playback;
+- `assets/audio` contains generated mono WAV effects, Ogg Vorbis music stems,
+  and provenance metadata, while `assets/audio.js` supplies browser Web Audio
+  playback;
 - `index.html` owns the static full-viewport shell and branded loader; and
 - `Trunk.toml` and `.github/workflows/web.yml` own packaging, browser smoke
   tests, and Pages deployment.
@@ -319,8 +321,8 @@ not pause play.
 The web build stores its best score in same-origin `localStorage`. It uses a
 versioned key, tolerates unavailable or malformed storage, and has no account
 or server synchronization. The native build retains a session-only best score.
-Both targets persist only the master sound volume and mute preference through
-eframe storage. No game state is persisted.
+Both targets persist the effects volume, music volume, and global mute
+preference through eframe storage. No game state is persisted.
 
 The web shell keeps a visually hidden semantic status synchronized with the
 canvas screen so assistive technology and browser smoke tests can identify the
@@ -341,6 +343,31 @@ mono, 16-bit, 32-kHz WAV files are generated deterministically by
 the generator follows the repository's source-code license. The complete bank
 must remain below 750 KiB uncompressed.
 
+The adaptive score is an independently created, clean-room composition. It
+does not import, transcribe, arrange, or imitate a third-party melody. Its
+industrial-electronic palette uses a restrained chiptune edge, a short angular
+motif, modal nonfunctional harmony, and syncopated 3+3+2 accents in 4/4. The
+fixed 132-BPM form spans 64 bars, or about 116 seconds, before looping.
+
+`tools/generate_music.py` deterministically renders three synchronized mono,
+32-kHz stems. Lossless masters remain under `target`; the checked-in Ogg
+Vorbis assets and `music_manifest.json` must stay below 4 MiB combined. FFmpeg
+is the preferred development-time encoder. The repository-local Rust encoder
+is a source-built fallback. Ordinary builds consume checked-in assets and do
+not require either encoder.
+
+The music tiers are:
+
+- base at levels 1 through 4;
+- base plus drive at levels 5 through 9; and
+- all three stems from level 10 onward.
+
+Board danger temporarily advances the score by one tier. Danger begins when a
+locked cell reaches row 27 or higher and clears only after the highest locked
+cell returns to row 30 or lower. Tier gains change at the next musical bar
+with a short crossfade. Tempo never changes. Major clear and level-up cues duck
+music by 3 dB for 300 milliseconds; ordinary movement cues do not.
+
 The mix follows these rules:
 
 - successful horizontal moves alternate between two quiet ticks, with small
@@ -356,27 +383,31 @@ The mix follows these rules:
 - board-position panning is limited to a narrow stereo range; and
 - no more than 16 voices may play simultaneously.
 
-The master sound-effects volume defaults to 70 percent. A speaker control is
-available on title and game screens, including during active play. It opens an
-inline volume slider and mute button. `M` toggles mute globally and produces a
-short visual and accessible status confirmation. Audio never carries gameplay
-information that is absent visually.
+Effects default to 70 percent and music to 35 percent. Their independent
+sliders use a perceptual gain curve. A speaker control is available on title
+and game screens, including during active play. `M` toggles a global mute and
+produces a short visual and accessible status confirmation. Muting preserves
+the logical music timeline so unmuting rejoins the current position. Audio
+never carries gameplay information that is absent visually.
 
-Intentional pause and resume have short cues. Pausing stops active sounds.
-Focus loss, page hiding, and unsupported viewport transitions stop sounds
-without playing a pause cue; returning focus never resumes either gameplay or
-audio automatically.
+Music plays only during gameplay. A new run starts it at bar one. Intentional
+pause and resume have short cues; pausing stops active effects and suspends the
+music at its current position. Focus loss, page hiding, and unsupported
+viewport transitions perform the same suspension without a pause cue.
+Returning focus never resumes gameplay or audio automatically. Game over and
+returning to the title stop the music.
 
-Native playback uses Kira with predecoded static sounds. The web shell begins
-fetching the same files only after the app is interactive, then uses Web Audio
-and unlocks its context on the first pointer or keyboard gesture. Audio never
-blocks the title screen. Initialization, decoding, device, and playback errors
-are nonfatal: the game continues silently and disables the sound control when
-the platform reports audio as unavailable.
+Native playback uses Kira with predecoded static effects and streaming music.
+The web shell begins fetching assets only after the app is interactive, then
+uses Web Audio and unlocks its context on the first pointer or keyboard
+gesture. Gameplay never waits for music. If music becomes ready during a run,
+it joins at the next bar. Music decoding failures disable only music; effects
+continue normally. Output initialization and effect failures remain nonfatal.
 
 The non-default `audio-lab` Cargo feature replaces the game UI with a
-development soundboard. It previews every cue, rate and pan variations, and
-representative compound events. Release builds do not enable this feature.
+development soundboard. It previews every cue, rate and pan variations,
+representative compound events, each music tier, ducking, pause, and resume.
+Release builds do not enable this feature.
 
 ## Visual system
 
@@ -465,9 +496,12 @@ The web-primary milestone is complete only when:
 - one physical iPhone and one physical Android phone pass portrait, landscape,
   multi-touch, held release, orientation, audio, safe-area, browser-chrome,
   and background-resume checks;
-- audio latency, balance, focus behavior, and preference persistence receive
-  manual checks on the web and native macOS;
-- generated audio files match `tools/generate_audio.py --check`;
+- audio latency, balance, focus behavior, preference persistence, tier
+  transitions, and music failure isolation receive manual checks on the web
+  and native macOS;
+- ten consecutive music loops have no audible seam, click, or stem drift;
+- generated audio files match `tools/generate_audio.py --check` and
+  `tools/generate_music.py --check`;
 - the static bundle works from relative paths suitable for GitHub Pages;
 - formatting, strict Clippy, and tests are clean; and
 - this specification and the README match the implementation.

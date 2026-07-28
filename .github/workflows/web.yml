@@ -27,6 +27,7 @@ jobs:
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test
       - run: python3 tools/generate_audio.py --check
+      - run: python3 tools/generate_music.py --check
 
   web:
     name: WebAssembly build and browser smoke test

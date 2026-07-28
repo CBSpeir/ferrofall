@@ -57,7 +57,8 @@ pub(crate) enum UiAction {
     MainMenu,
     ToggleAudioControls,
     ToggleMute,
-    SetAudioVolume(f32),
+    SetEffectsVolume(f32),
+    SetMusicVolume(f32),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -151,12 +152,15 @@ impl UiOutput {
 
 #[derive(Clone, Copy)]
 pub(crate) struct AudioUiState<'a> {
-    pub(crate) volume: f32,
+    pub(crate) effects_volume: f32,
+    pub(crate) music_volume: f32,
     pub(crate) muted: bool,
     pub(crate) available: bool,
+    pub(crate) music_available: bool,
     pub(crate) controls_open: bool,
     pub(crate) notice: Option<&'a str>,
     pub(crate) failure_reason: Option<&'a str>,
+    pub(crate) music_failure_reason: Option<&'a str>,
 }
 
 pub(crate) struct UiState<'a> {
@@ -177,9 +181,14 @@ pub(crate) enum AudioLabAction {
     PreviewCompound(CompoundPreview),
     Stop,
     ToggleMute,
-    SetVolume(f32),
+    SetEffectsVolume(f32),
+    SetMusicVolume(f32),
     SetRate(f32),
     SetPan(f32),
+    PreviewMusic(crate::audio::MusicTier),
+    PauseMusic,
+    ResumeMusic,
+    DuckMusic,
 }
 
 #[derive(Default)]
@@ -320,7 +329,8 @@ pub(crate) fn show_audio_lab(
     ui.painter().rect_filled(rect, 0.0, BACKGROUND);
     paint_background_grid(ui.painter(), rect);
     let mut action = AudioLabAction::None;
-    let mut volume = audio.volume;
+    let mut effects_volume = audio.effects_volume;
+    let mut music_volume = audio.music_volume;
     let mut preview_rate = rate;
     let mut preview_pan = pan;
 
@@ -347,12 +357,22 @@ pub(crate) fn show_audio_lab(
         }
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new("VOLUME").font(label_font(10.0)).color(MUTED));
+            ui.label(RichText::new("EFFECTS").font(label_font(10.0)).color(MUTED));
             if ui
-                .add(egui::Slider::new(&mut volume, 0.0..=1.0).show_value(true))
+                .add(egui::Slider::new(&mut effects_volume, 0.0..=1.0).show_value(true))
                 .changed()
             {
-                action = AudioLabAction::SetVolume(volume);
+                action = AudioLabAction::SetEffectsVolume(effects_volume);
+            }
+            ui.label(RichText::new("MUSIC").font(label_font(10.0)).color(MUTED));
+            if ui
+                .add_enabled(
+                    audio.music_available,
+                    egui::Slider::new(&mut music_volume, 0.0..=1.0).show_value(true),
+                )
+                .changed()
+            {
+                action = AudioLabAction::SetMusicVolume(music_volume);
             }
             if ui
                 .button(if audio.muted {
@@ -405,6 +425,54 @@ pub(crate) fn show_audio_lab(
                     }
                 }
             });
+        ui.add_space(12.0);
+        ui.label(
+            RichText::new("ADAPTIVE MUSIC")
+                .font(label_font(11.0))
+                .color(MUTED),
+        );
+        if !audio.music_available {
+            ui.label(
+                RichText::new(
+                    audio
+                        .music_failure_reason
+                        .unwrap_or("Music assets unavailable"),
+                )
+                .font(label_font(10.0))
+                .color(AMBER),
+            );
+        }
+        ui.horizontal(|ui| {
+            use crate::audio::MusicTier;
+
+            if ui
+                .add_enabled(audio.music_available, egui::Button::new("BASE TIER"))
+                .clicked()
+            {
+                action = AudioLabAction::PreviewMusic(MusicTier::Base);
+            }
+            if ui
+                .add_enabled(audio.music_available, egui::Button::new("DRIVE TIER"))
+                .clicked()
+            {
+                action = AudioLabAction::PreviewMusic(MusicTier::Drive);
+            }
+            if ui
+                .add_enabled(audio.music_available, egui::Button::new("PRESSURE TIER"))
+                .clicked()
+            {
+                action = AudioLabAction::PreviewMusic(MusicTier::Pressure);
+            }
+            if ui.button("PAUSE MUSIC").clicked() {
+                action = AudioLabAction::PauseMusic;
+            }
+            if ui.button("RESUME MUSIC").clicked() {
+                action = AudioLabAction::ResumeMusic;
+            }
+            if ui.button("DUCK MUSIC").clicked() {
+                action = AudioLabAction::DuckMusic;
+            }
+        });
         ui.add_space(12.0);
         ui.label(
             RichText::new("COMPOUND EVENTS")
@@ -1567,7 +1635,11 @@ fn show_audio_control(
             },
         )
         .on_hover_text(if audio.available {
-            if audio.muted {
+            if !audio.music_available {
+                audio
+                    .music_failure_reason
+                    .unwrap_or("Music unavailable; effects remain available")
+            } else if audio.muted {
                 "Sound muted (M)"
             } else {
                 "Sound volume (M to mute)"
@@ -1601,7 +1673,7 @@ fn show_audio_control(
     paint_speaker_icon(
         ui.painter(),
         face_rect,
-        audio.muted || audio.volume <= 0.0,
+        audio.muted || (audio.effects_volume <= 0.0 && audio.music_volume <= 0.0),
         foreground,
     );
 
@@ -1636,7 +1708,7 @@ fn show_audio_control(
         .clamp(rect.left() + 8.0, rect.right() - panel_width - 8.0);
     let panel = Rect::from_min_size(
         pos2(panel_left, button_rect.bottom() + 8.0),
-        vec2(panel_width, 100.0),
+        vec2(panel_width, 170.0),
     );
     ui.painter().rect_filled(panel, 3.0, SURFACE);
     ui.painter()
@@ -1648,30 +1720,9 @@ fn show_audio_control(
         label_font(11.0),
         MUTED,
     );
-    ui.painter().text(
-        pos2(panel.right() - 14.0, panel.top() + 14.0),
-        Align2::RIGHT_TOP,
-        format!("{}%", (audio.volume * 100.0).round() as u32),
-        label_font(11.0),
-        TEXT,
-    );
-
-    let mut volume = audio.volume;
-    let slider_rect = Rect::from_min_size(
-        pos2(panel.left() + 14.0, panel.top() + 38.0),
-        vec2(120.0, 30.0),
-    );
-    let slider = ui
-        .push_id("audio_volume_slider", |ui| {
-            ui.put(
-                slider_rect,
-                egui::Slider::new(&mut volume, 0.0..=1.0).show_value(false),
-            )
-        })
-        .inner;
     let mute_rect = Rect::from_min_size(
-        pos2(panel.right() - 122.0, panel.top() + 40.0),
-        vec2(108.0, 26.0),
+        pos2(panel.right() - 104.0, panel.top() + 10.0),
+        vec2(90.0, 26.0),
     );
     let mute = ui
         .push_id("audio_mute_button", |ui| {
@@ -1683,16 +1734,83 @@ fn show_audio_control(
             )
         })
         .inner;
+
+    let mut effects_volume = audio.effects_volume;
+    let effects_label_y = panel.top() + 48.0;
+    ui.painter().text(
+        pos2(panel.left() + 14.0, effects_label_y),
+        Align2::LEFT_TOP,
+        "EFFECTS",
+        label_font(10.0),
+        MUTED,
+    );
+    ui.painter().text(
+        pos2(panel.right() - 14.0, effects_label_y),
+        Align2::RIGHT_TOP,
+        format!("{}%", (effects_volume * 100.0).round() as u32),
+        label_font(10.0),
+        TEXT,
+    );
+    let effects_slider_rect = Rect::from_min_size(
+        pos2(panel.left() + 14.0, panel.top() + 64.0),
+        vec2(panel.width() - 28.0, 26.0),
+    );
+    let effects_slider = ui
+        .push_id("effects_volume_slider", |ui| {
+            ui.put(
+                effects_slider_rect,
+                egui::Slider::new(&mut effects_volume, 0.0..=1.0).show_value(false),
+            )
+        })
+        .inner;
+
+    let mut music_volume = audio.music_volume;
+    let music_label_y = panel.top() + 94.0;
+    ui.painter().text(
+        pos2(panel.left() + 14.0, music_label_y),
+        Align2::LEFT_TOP,
+        "MUSIC",
+        label_font(10.0),
+        if audio.music_available { MUTED } else { AMBER },
+    );
+    ui.painter().text(
+        pos2(panel.right() - 14.0, music_label_y),
+        Align2::RIGHT_TOP,
+        if audio.music_available {
+            format!("{}%", (music_volume * 100.0).round() as u32)
+        } else {
+            "UNAVAILABLE".to_owned()
+        },
+        label_font(10.0),
+        if audio.music_available { TEXT } else { AMBER },
+    );
+    let music_slider_rect = Rect::from_min_size(
+        pos2(panel.left() + 14.0, panel.top() + 110.0),
+        vec2(panel.width() - 28.0, 26.0),
+    );
+    let music_slider = ui
+        .push_id("music_volume_slider", |ui| {
+            ui.add_enabled_ui(audio.music_available, |ui| {
+                ui.put(
+                    music_slider_rect,
+                    egui::Slider::new(&mut music_volume, 0.0..=1.0).show_value(false),
+                )
+            })
+            .inner
+        })
+        .inner;
     ui.painter().text(
         pos2(panel.left() + 14.0, panel.bottom() - 13.0),
         Align2::LEFT_BOTTOM,
-        "M toggles mute",
+        "M toggles all audio",
         label_font(9.0),
         MUTED,
     );
 
-    if slider.changed() {
-        UiAction::SetAudioVolume(volume)
+    if effects_slider.changed() {
+        UiAction::SetEffectsVolume(effects_volume)
+    } else if music_slider.changed() {
+        UiAction::SetMusicVolume(music_volume)
     } else if mute {
         UiAction::ToggleMute
     } else {
@@ -2360,12 +2478,15 @@ mod tests {
                         effects: &VisualEffects::default(),
                         now: Instant::now(),
                         audio: AudioUiState {
-                            volume: 0.7,
+                            effects_volume: 0.7,
+                            music_volume: 0.35,
                             muted: false,
                             available: true,
+                            music_available: true,
                             controls_open: false,
                             notice: None,
                             failure_reason: None,
+                            music_failure_reason: None,
                         },
                         touch_controls: false,
                         active_touch_controls: &[],

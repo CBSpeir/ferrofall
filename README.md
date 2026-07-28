@@ -2,9 +2,9 @@
 
 Oxidefall is a falling-block puzzle game written in Rust. Its primary release
 is a static WebAssembly website rendered with `eframe` and egui. The same
-deterministic engine and interface also build as a native desktop app.
-Original industrial-electronic sound effects provide optional gameplay and
-menu feedback on both targets.
+deterministic engine and interface also build as a native desktop app. An
+original adaptive industrial-electronic score and sound effects provide
+optional audio on both targets.
 
 ## Run the website locally
 
@@ -72,9 +72,11 @@ or navigating away abandons the active run without a confirmation dialog.
 Oxidefall has no accounts, analytics, cookies, service worker, or remote
 telemetry.
 
-The speaker control opens a master sound-effects volume slider. Volume and mute
-state are stored locally on both web and native builds. Audio starts only after
-player interaction and never blocks gameplay when output is unavailable.
+The speaker control opens separate Music and Effects sliders. `M` globally
+mutes or restores both without resetting the music timeline. Both volumes and
+the mute state are stored locally. Music starts with gameplay, follows level
+and stack danger, and suspends at the current position when the game pauses.
+Audio starts only after player interaction and never blocks gameplay.
 
 ## Gameplay
 
@@ -101,12 +103,15 @@ npm ci
 npx playwright install chromium
 npm run test:web
 python3 tools/generate_audio.py --check
+python3 tools/generate_music.py --check
 ```
 
 Run `cargo run --features audio-lab` to open the development-only soundboard.
-It previews individual cues, pitch and pan variants, and compound scoring
-events. Regenerate the original WAV bank with
-`python3 tools/generate_audio.py`.
+It previews individual cues, pitch and pan variants, compound scoring events,
+and every adaptive music tier. Regenerate the WAV effects with
+`python3 tools/generate_audio.py`. Regenerate the Ogg Vorbis music stems with
+`python3 tools/generate_music.py`; FFmpeg is preferred, with the repository's
+source-built Rust encoder available as a fallback.
 
 The GitHub Actions workflow runs native quality gates, builds the release
 WebAssembly bundle, and exercises it in headless Chromium. Successful pushes
@@ -120,8 +125,8 @@ at your option. See [LICENSE-MIT](LICENSE-MIT) and
 [LICENSE-APACHE](LICENSE-APACHE).
 
 The source licenses do not grant rights to the Oxidefall name or branding.
-Generated sound effects in `assets/audio` are separately dedicated to the
-public domain under CC0 1.0.
+Generated sound effects, music stems, and composition data in `assets/audio`
+are separately dedicated to the public domain under CC0 1.0.
 
 Saira Condensed ExtraBold and IBM Plex Mono Medium are bundled under the SIL
 Open Font License 1.1. Their license texts and source details are in

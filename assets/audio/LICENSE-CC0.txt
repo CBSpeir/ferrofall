@@ -1,9 +1,9 @@
-Oxidefall Sound Effects
+Oxidefall Audio Assets
 
 To the extent possible under law, the creator has waived all copyright and
-related or neighboring rights to the generated Oxidefall sound effects in this
-directory under the Creative Commons CC0 1.0 Universal Public Domain
-Dedication.
+related or neighboring rights to the generated Oxidefall sound effects, music
+stems, and composition data in this directory under the Creative Commons CC0
+1.0 Universal Public Domain Dedication.
 
 SPDX-License-Identifier: CC0-1.0
 

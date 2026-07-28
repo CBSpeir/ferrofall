@@ -1,14 +1,51 @@
 use std::time::Duration;
 
+use web_time::Instant;
+
 use crate::game::{GameEvent, MovementDirection, RotationDirection, Spin, VISIBLE_HEIGHT};
 
-pub(crate) const DEFAULT_VOLUME: f32 = 0.70;
+pub(crate) const DEFAULT_EFFECTS_VOLUME: f32 = 0.70;
+pub(crate) const DEFAULT_MUSIC_VOLUME: f32 = 0.35;
+const DANGER_START_ROW: usize = crate::game::VISIBLE_TOP + 7;
+const DANGER_CLEAR_ROW: usize = crate::game::VISIBLE_TOP + 10;
+const MUSIC_DUCK_DURATION: Duration = Duration::from_millis(300);
+#[cfg(not(target_arch = "wasm32"))]
+const MUSIC_BAR_SECONDS: f64 = 240.0 / 132.0;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_VOICES: usize = 16;
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn prepare_web_audio() {
     output::prepare();
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum MusicTier {
+    Base,
+    Drive,
+    Pressure,
+}
+
+impl MusicTier {
+    const fn layer_count(self) -> usize {
+        match self {
+            Self::Base => 1,
+            Self::Drive => 2,
+            Self::Pressure => 3,
+        }
+    }
+
+    const fn advance(self) -> Self {
+        match self {
+            Self::Base => Self::Drive,
+            Self::Drive | Self::Pressure => Self::Pressure,
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    const fn web_value(self) -> u8 {
+        self.layer_count() as u8
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -166,21 +203,32 @@ impl CueRequest {
 
 pub(crate) struct AudioSystem {
     output: output::Output,
-    volume: f32,
+    effects_volume: f32,
+    music_volume: f32,
     muted: bool,
     alternate_move: bool,
+    music_tier: MusicTier,
+    danger_active: bool,
+    music_ducked_until: Option<Instant>,
 }
 
 impl AudioSystem {
-    pub(crate) fn new(volume: f32, muted: bool) -> Self {
-        let volume = volume.clamp(0.0, 1.0);
+    pub(crate) fn new(effects_volume: f32, music_volume: f32, muted: bool) -> Self {
+        let effects_volume = effects_volume.clamp(0.0, 1.0);
+        let music_volume = music_volume.clamp(0.0, 1.0);
         let mut output = output::Output::new();
-        output.set_master_volume(if muted { 0.0 } else { volume });
+        output.set_effects_volume(perceptual_gain(effects_volume));
+        output.set_music_volume(perceptual_gain(music_volume));
+        output.set_muted(muted);
         Self {
             output,
-            volume,
+            effects_volume,
+            music_volume,
             muted,
             alternate_move: false,
+            music_tier: MusicTier::Base,
+            danger_active: false,
+            music_ducked_until: None,
         }
     }
 
@@ -192,8 +240,20 @@ impl AudioSystem {
         self.output.failure_reason()
     }
 
-    pub(crate) const fn volume(&self) -> f32 {
-        self.volume
+    pub(crate) fn is_music_available(&self) -> bool {
+        self.output.music_available()
+    }
+
+    pub(crate) fn music_failure_reason(&self) -> Option<&str> {
+        self.output.music_failure_reason()
+    }
+
+    pub(crate) const fn effects_volume(&self) -> f32 {
+        self.effects_volume
+    }
+
+    pub(crate) const fn music_volume(&self) -> f32 {
+        self.music_volume
     }
 
     pub(crate) const fn is_muted(&self) -> bool {
@@ -202,17 +262,24 @@ impl AudioSystem {
 
     pub(crate) fn activate(&mut self) {
         self.output.activate();
-        self.apply_master_volume();
+        self.apply_output_levels();
     }
 
-    pub(crate) fn set_volume(&mut self, volume: f32) {
-        self.volume = volume.clamp(0.0, 1.0);
-        self.apply_master_volume();
+    pub(crate) fn set_effects_volume(&mut self, volume: f32) {
+        self.effects_volume = volume.clamp(0.0, 1.0);
+        self.output
+            .set_effects_volume(perceptual_gain(self.effects_volume));
+    }
+
+    pub(crate) fn set_music_volume(&mut self, volume: f32) {
+        self.music_volume = volume.clamp(0.0, 1.0);
+        self.output
+            .set_music_volume(perceptual_gain(self.music_volume));
     }
 
     pub(crate) fn set_muted(&mut self, muted: bool) {
         self.muted = muted;
-        self.apply_master_volume();
+        self.output.set_muted(muted);
     }
 
     pub(crate) fn toggle_muted(&mut self) {
@@ -224,6 +291,65 @@ impl AudioSystem {
 
     pub(crate) fn stop_all(&mut self) {
         self.output.stop_all();
+        self.music_ducked_until = None;
+    }
+
+    pub(crate) fn stop_effects(&mut self) {
+        self.output.stop_effects();
+    }
+
+    pub(crate) fn start_music(&mut self) {
+        self.music_tier = MusicTier::Base;
+        self.danger_active = false;
+        self.music_ducked_until = None;
+        self.output.start_music(self.music_tier);
+    }
+
+    pub(crate) fn pause_music(&mut self) {
+        self.output.pause_music();
+    }
+
+    pub(crate) fn resume_music(&mut self) {
+        self.output.resume_music();
+    }
+
+    pub(crate) fn stop_music(&mut self) {
+        self.output.stop_music();
+        self.music_ducked_until = None;
+    }
+
+    pub(crate) fn update_music(
+        &mut self,
+        level: u32,
+        highest_locked_row: Option<usize>,
+        now: Instant,
+    ) {
+        self.danger_active = if self.danger_active {
+            highest_locked_row.is_some_and(|row| row < DANGER_CLEAR_ROW)
+        } else {
+            highest_locked_row.is_some_and(|row| row <= DANGER_START_ROW)
+        };
+        let baseline = baseline_music_tier(level);
+        let target = if self.danger_active {
+            baseline.advance()
+        } else {
+            baseline
+        };
+        if target != self.music_tier {
+            self.music_tier = target;
+            self.output.set_music_tier(target);
+        }
+        self.tick(now);
+    }
+
+    pub(crate) fn tick(&mut self, now: Instant) {
+        if self
+            .music_ducked_until
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.music_ducked_until = None;
+            self.output.set_music_ducked(false);
+        }
     }
 
     pub(crate) fn play_ui(&mut self, cue: Cue) {
@@ -241,7 +367,16 @@ impl AudioSystem {
             .iter()
             .any(|event| matches!(event, GameEvent::GameOver))
         {
-            self.stop_all();
+            self.stop_music();
+            self.stop_effects();
+        } else if events.iter().any(|event| {
+            matches!(
+                event,
+                GameEvent::Cleared { .. } | GameEvent::LevelChanged(_)
+            )
+        }) {
+            self.output.set_music_ducked(true);
+            self.music_ducked_until = Some(Instant::now() + MUSIC_DUCK_DURATION);
         }
         for request in plan_game_audio(events, new_best, &mut self.alternate_move) {
             self.play_request(request);
@@ -285,16 +420,45 @@ impl AudioSystem {
         }
     }
 
+    #[cfg(feature = "audio-lab")]
+    pub(crate) fn preview_music(&mut self, tier: MusicTier) {
+        self.activate();
+        self.stop_music();
+        self.music_tier = tier;
+        self.output.start_music(tier);
+    }
+
+    #[cfg(feature = "audio-lab")]
+    pub(crate) fn preview_music_duck(&mut self) {
+        self.output.set_music_ducked(true);
+        self.music_ducked_until = Some(Instant::now() + MUSIC_DUCK_DURATION);
+    }
+
     fn play_request(&mut self, request: CueRequest) {
-        if self.muted || self.volume <= 0.0 {
+        if self.muted || self.effects_volume <= 0.0 {
             return;
         }
         self.output.play(request);
     }
 
-    fn apply_master_volume(&mut self) {
+    fn apply_output_levels(&mut self) {
         self.output
-            .set_master_volume(if self.muted { 0.0 } else { self.volume });
+            .set_effects_volume(perceptual_gain(self.effects_volume));
+        self.output
+            .set_music_volume(perceptual_gain(self.music_volume));
+        self.output.set_muted(self.muted);
+    }
+}
+
+fn perceptual_gain(volume: f32) -> f32 {
+    volume.clamp(0.0, 1.0).powi(2)
+}
+
+fn baseline_music_tier(level: u32) -> MusicTier {
+    match level {
+        0..=4 => MusicTier::Base,
+        5..=9 => MusicTier::Drive,
+        _ => MusicTier::Pressure,
     }
 }
 
@@ -424,38 +588,54 @@ fn column_pan(column: i32) -> f32 {
 mod output {
     use std::collections::HashMap;
     use std::io::Cursor;
+    use std::time::Duration;
 
+    use kira::sound::FromFileError;
     use kira::sound::PlaybackState;
     use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle};
+    use kira::sound::streaming::{StreamingSoundData, StreamingSoundHandle};
     use kira::{AudioManager, Decibels, DefaultBackend, StartTime, Tween};
 
-    use super::{Cue, CueRequest, MAX_VOICES};
+    use super::{Cue, CueRequest, MAX_VOICES, MUSIC_BAR_SECONDS, MusicTier};
 
     pub(super) struct Output {
         bank: Option<HashMap<Cue, StaticSoundData>>,
+        music_assets: [&'static [u8]; 3],
         manager: Option<AudioManager<DefaultBackend>>,
         handles: Vec<StaticSoundHandle>,
-        master_volume: f32,
+        music_handles: Vec<StreamingSoundHandle<FromFileError>>,
+        effects_volume: f32,
+        music_volume: f32,
+        music_tier: MusicTier,
+        music_ducked: bool,
+        muted: bool,
         failure_reason: Option<String>,
+        music_failure_reason: Option<String>,
     }
 
     impl Output {
         pub(super) fn new() -> Self {
-            match load_bank() {
-                Ok(bank) => Self {
-                    bank: Some(bank),
-                    manager: None,
-                    handles: Vec::new(),
-                    master_volume: 1.0,
-                    failure_reason: None,
-                },
-                Err(reason) => Self {
-                    bank: None,
-                    manager: None,
-                    handles: Vec::new(),
-                    master_volume: 1.0,
-                    failure_reason: Some(reason),
-                },
+            let (bank, failure_reason) = match load_bank() {
+                Ok(bank) => (Some(bank), None),
+                Err(reason) => (None, Some(reason)),
+            };
+            Self {
+                bank,
+                music_assets: [
+                    include_bytes!("../assets/audio/music_base.ogg"),
+                    include_bytes!("../assets/audio/music_drive.ogg"),
+                    include_bytes!("../assets/audio/music_pressure.ogg"),
+                ],
+                manager: None,
+                handles: Vec::new(),
+                music_handles: Vec::new(),
+                effects_volume: 1.0,
+                music_volume: 1.0,
+                music_tier: MusicTier::Base,
+                music_ducked: false,
+                muted: false,
+                failure_reason,
+                music_failure_reason: None,
             }
         }
 
@@ -465,6 +645,16 @@ mod output {
 
         pub(super) fn failure_reason(&self) -> Option<&str> {
             self.failure_reason.as_deref()
+        }
+
+        pub(super) fn music_available(&self) -> bool {
+            self.failure_reason.is_none() && self.music_failure_reason.is_none()
+        }
+
+        pub(super) fn music_failure_reason(&self) -> Option<&str> {
+            self.failure_reason
+                .as_deref()
+                .or(self.music_failure_reason.as_deref())
         }
 
         pub(super) fn activate(&mut self) {
@@ -478,9 +668,10 @@ mod output {
             #[cfg(not(test))]
             match AudioManager::<DefaultBackend>::new(kira::AudioManagerSettings::default()) {
                 Ok(mut manager) => {
-                    manager
-                        .main_track()
-                        .set_volume(linear_to_decibels(self.master_volume), Tween::default());
+                    manager.main_track().set_volume(
+                        linear_to_decibels(if self.muted { 0.0 } else { 1.0 }),
+                        Tween::default(),
+                    );
                     self.manager = Some(manager);
                 }
                 Err(error) => {
@@ -489,17 +680,29 @@ mod output {
             }
         }
 
-        pub(super) fn set_master_volume(&mut self, volume: f32) {
-            self.master_volume = volume.clamp(0.0, 1.0);
+        pub(super) fn set_muted(&mut self, muted: bool) {
+            self.muted = muted;
             if let Some(manager) = self.manager.as_mut() {
                 manager.main_track().set_volume(
-                    linear_to_decibels(self.master_volume),
+                    linear_to_decibels(if muted { 0.0 } else { 1.0 }),
                     Tween {
                         duration: std::time::Duration::from_millis(40),
                         ..Default::default()
                     },
                 );
             }
+        }
+
+        pub(super) fn set_effects_volume(&mut self, volume: f32) {
+            self.effects_volume = volume.clamp(0.0, 1.0);
+        }
+
+        pub(super) fn set_music_volume(&mut self, volume: f32) {
+            self.music_volume = volume.clamp(0.0, 1.0);
+            self.update_music_gains(Tween {
+                duration: Duration::from_millis(40),
+                ..Default::default()
+            });
         }
 
         pub(super) fn play(&mut self, request: CueRequest) {
@@ -517,7 +720,7 @@ mod output {
                 return;
             };
             let sound = data
-                .volume(request.gain_db)
+                .volume(request.gain_db + linear_gain_db(self.effects_volume))
                 .playback_rate(request.rate as f64)
                 .panning(request.pan)
                 .start_time(StartTime::Delayed(request.delay));
@@ -526,7 +729,7 @@ mod output {
             }
         }
 
-        pub(super) fn stop_all(&mut self) {
+        pub(super) fn stop_effects(&mut self) {
             for handle in &mut self.handles {
                 handle.stop(Tween {
                     duration: std::time::Duration::from_millis(15),
@@ -535,6 +738,138 @@ mod output {
             }
             self.handles.clear();
         }
+
+        pub(super) fn start_music(&mut self, tier: MusicTier) {
+            self.stop_music();
+            self.music_tier = tier;
+            self.music_ducked = false;
+            let layer_count = self.music_tier.layer_count();
+            let music_volume = self.music_volume;
+            let Some(manager) = self.manager.as_mut() else {
+                return;
+            };
+            let start_time = StartTime::Delayed(Duration::from_millis(60));
+            let mut handles = Vec::with_capacity(self.music_assets.len());
+            let mut failure_reason = None;
+            for (index, bytes) in self.music_assets.iter().enumerate() {
+                let gain = if index < layer_count {
+                    music_volume
+                } else {
+                    0.0
+                };
+                let sound = match StreamingSoundData::from_cursor(Cursor::new(*bytes)) {
+                    Ok(sound) => sound,
+                    Err(error) => {
+                        failure_reason = Some(format!("Could not decode music stem: {error}"));
+                        break;
+                    }
+                }
+                .loop_region(..)
+                .volume(linear_to_decibels(gain))
+                .panning(match index {
+                    1 => -0.08,
+                    2 => 0.08,
+                    _ => 0.0,
+                })
+                .start_time(start_time);
+                match manager.play(sound) {
+                    Ok(handle) => handles.push(handle),
+                    Err(error) => {
+                        failure_reason = Some(format!("Could not play music stem: {error}"));
+                        break;
+                    }
+                }
+            }
+            self.music_handles = handles;
+            if let Some(reason) = failure_reason {
+                self.music_failure_reason = Some(reason);
+                self.stop_music();
+            }
+        }
+
+        pub(super) fn set_music_tier(&mut self, tier: MusicTier) {
+            self.music_tier = tier;
+            let delay = self
+                .music_handles
+                .first()
+                .map(StreamingSoundHandle::position)
+                .map(|position| {
+                    let remainder = position.rem_euclid(MUSIC_BAR_SECONDS);
+                    if remainder <= 0.02 {
+                        Duration::ZERO
+                    } else {
+                        Duration::from_secs_f64(MUSIC_BAR_SECONDS - remainder)
+                    }
+                })
+                .unwrap_or(Duration::ZERO);
+            self.update_music_gains(Tween {
+                start_time: StartTime::Delayed(delay),
+                duration: Duration::from_millis(250),
+                ..Default::default()
+            });
+        }
+
+        pub(super) fn pause_music(&mut self) {
+            for handle in &mut self.music_handles {
+                handle.pause(Tween {
+                    duration: Duration::from_millis(15),
+                    ..Default::default()
+                });
+            }
+        }
+
+        pub(super) fn resume_music(&mut self) {
+            if self.music_handles.is_empty() {
+                self.start_music(self.music_tier);
+                return;
+            }
+            for handle in &mut self.music_handles {
+                handle.resume(Tween {
+                    duration: Duration::from_millis(40),
+                    ..Default::default()
+                });
+            }
+        }
+
+        pub(super) fn stop_music(&mut self) {
+            for handle in &mut self.music_handles {
+                handle.stop(Tween {
+                    duration: Duration::from_millis(150),
+                    ..Default::default()
+                });
+            }
+            self.music_handles.clear();
+        }
+
+        pub(super) fn set_music_ducked(&mut self, ducked: bool) {
+            self.music_ducked = ducked;
+            self.update_music_gains(Tween {
+                duration: if ducked {
+                    Duration::from_millis(25)
+                } else {
+                    Duration::from_millis(180)
+                },
+                ..Default::default()
+            });
+        }
+
+        pub(super) fn stop_all(&mut self) {
+            self.stop_effects();
+            self.stop_music();
+        }
+
+        fn update_music_gains(&mut self, tween: Tween) {
+            let layer_count = self.music_tier.layer_count();
+            let duck_gain = if self.music_ducked { 0.707_945_76 } else { 1.0 };
+            for (index, handle) in self.music_handles.iter_mut().enumerate() {
+                let gain = if index < layer_count {
+                    self.music_volume * duck_gain
+                } else {
+                    0.0
+                };
+                handle.set_volume(linear_to_decibels(gain), tween);
+            }
+        }
     }
 
     fn linear_to_decibels(volume: f32) -> Decibels {
@@ -542,6 +877,14 @@ mod output {
             Decibels::SILENCE
         } else {
             Decibels(20.0 * volume.log10())
+        }
+    }
+
+    fn linear_gain_db(volume: f32) -> f32 {
+        if volume <= 0.0 {
+            -120.0
+        } else {
+            20.0 * volume.log10()
         }
     }
 
@@ -621,7 +964,7 @@ mod output {
 mod output {
     use wasm_bindgen::prelude::wasm_bindgen;
 
-    use super::CueRequest;
+    use super::{CueRequest, MusicTier};
 
     #[wasm_bindgen]
     extern "C" {
@@ -631,12 +974,32 @@ mod output {
         fn web_audio_prepare();
         #[wasm_bindgen(js_namespace = window, js_name = oxidefallAudioActivate)]
         fn web_audio_activate() -> bool;
-        #[wasm_bindgen(js_namespace = window, js_name = oxidefallAudioSetMasterVolume)]
-        fn web_audio_set_master_volume(volume: f32);
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallAudioSetMuted)]
+        fn web_audio_set_muted(muted: bool);
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallAudioSetEffectsVolume)]
+        fn web_audio_set_effects_volume(volume: f32);
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallAudioSetMusicVolume)]
+        fn web_audio_set_music_volume(volume: f32);
         #[wasm_bindgen(js_namespace = window, js_name = oxidefallAudioPlay)]
         fn web_audio_play(name: &str, gain_db: f32, rate: f32, pan: f32, delay_seconds: f64);
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallAudioStopEffects)]
+        fn web_audio_stop_effects();
         #[wasm_bindgen(js_namespace = window, js_name = oxidefallAudioStopAll)]
         fn web_audio_stop_all();
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallMusicAvailable)]
+        fn web_music_available() -> bool;
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallMusicStart)]
+        fn web_music_start(tier: u8);
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallMusicSetTier)]
+        fn web_music_set_tier(tier: u8);
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallMusicPause)]
+        fn web_music_pause();
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallMusicResume)]
+        fn web_music_resume();
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallMusicStop)]
+        fn web_music_stop();
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallMusicSetDucked)]
+        fn web_music_set_ducked(ducked: bool);
     }
 
     pub(super) fn prepare() {
@@ -663,15 +1026,35 @@ mod output {
                 .then_some("Web Audio is unavailable in this browser.")
         }
 
+        pub(super) fn music_available(&self) -> bool {
+            !self.failed && web_music_available()
+        }
+
+        pub(super) fn music_failure_reason(&self) -> Option<&str> {
+            (!self.music_available()).then_some("Music assets are unavailable.")
+        }
+
         pub(super) fn activate(&mut self) {
             if !self.failed {
                 self.failed = !web_audio_activate();
             }
         }
 
-        pub(super) fn set_master_volume(&mut self, volume: f32) {
+        pub(super) fn set_muted(&mut self, muted: bool) {
             if !self.failed {
-                web_audio_set_master_volume(volume);
+                web_audio_set_muted(muted);
+            }
+        }
+
+        pub(super) fn set_effects_volume(&mut self, volume: f32) {
+            if !self.failed {
+                web_audio_set_effects_volume(volume);
+            }
+        }
+
+        pub(super) fn set_music_volume(&mut self, volume: f32) {
+            if !self.failed {
+                web_audio_set_music_volume(volume);
             }
         }
 
@@ -684,6 +1067,48 @@ mod output {
                     request.pan,
                     request.delay.as_secs_f64(),
                 );
+            }
+        }
+
+        pub(super) fn stop_effects(&mut self) {
+            if !self.failed {
+                web_audio_stop_effects();
+            }
+        }
+
+        pub(super) fn start_music(&mut self, tier: MusicTier) {
+            if !self.failed {
+                web_music_start(tier.web_value());
+            }
+        }
+
+        pub(super) fn set_music_tier(&mut self, tier: MusicTier) {
+            if !self.failed {
+                web_music_set_tier(tier.web_value());
+            }
+        }
+
+        pub(super) fn pause_music(&mut self) {
+            if !self.failed {
+                web_music_pause();
+            }
+        }
+
+        pub(super) fn resume_music(&mut self) {
+            if !self.failed {
+                web_music_resume();
+            }
+        }
+
+        pub(super) fn stop_music(&mut self) {
+            if !self.failed {
+                web_music_stop();
+            }
+        }
+
+        pub(super) fn set_music_ducked(&mut self, ducked: bool) {
+            if !self.failed {
+                web_music_set_ducked(ducked);
             }
         }
 
@@ -784,5 +1209,64 @@ mod tests {
         assert_eq!(column_pan(4), -column_pan(5));
         assert_eq!(column_pan(-20), -0.35);
         assert_eq!(column_pan(20), 0.35);
+    }
+
+    #[test]
+    fn music_levels_map_to_three_permanent_tiers() {
+        assert_eq!(baseline_music_tier(1), MusicTier::Base);
+        assert_eq!(baseline_music_tier(4), MusicTier::Base);
+        assert_eq!(baseline_music_tier(5), MusicTier::Drive);
+        assert_eq!(baseline_music_tier(9), MusicTier::Drive);
+        assert_eq!(baseline_music_tier(10), MusicTier::Pressure);
+        assert_eq!(baseline_music_tier(100), MusicTier::Pressure);
+    }
+
+    #[test]
+    fn board_danger_advances_one_tier_with_hysteresis() {
+        let now = Instant::now();
+        let mut audio = AudioSystem::new(0.7, 0.35, false);
+
+        audio.update_music(1, None, now);
+        assert_eq!(audio.music_tier, MusicTier::Base);
+        assert!(!audio.danger_active);
+
+        audio.update_music(1, Some(DANGER_START_ROW), now);
+        assert_eq!(audio.music_tier, MusicTier::Drive);
+        assert!(audio.danger_active);
+
+        audio.update_music(1, Some(DANGER_CLEAR_ROW - 1), now);
+        assert_eq!(audio.music_tier, MusicTier::Drive);
+        assert!(audio.danger_active);
+
+        audio.update_music(1, Some(DANGER_CLEAR_ROW), now);
+        assert_eq!(audio.music_tier, MusicTier::Base);
+        assert!(!audio.danger_active);
+
+        audio.update_music(5, Some(DANGER_START_ROW), now);
+        assert_eq!(audio.music_tier, MusicTier::Pressure);
+    }
+
+    #[test]
+    fn volume_percentages_use_a_perceptual_gain_curve() {
+        assert_eq!(perceptual_gain(0.0), 0.0);
+        assert!((perceptual_gain(0.35) - 0.1225).abs() < f32::EPSILON);
+        assert!((perceptual_gain(0.70) - 0.49).abs() < f32::EPSILON);
+        assert_eq!(perceptual_gain(1.0), 1.0);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn checked_in_music_stems_open_as_streaming_vorbis() {
+        use std::io::Cursor;
+
+        use kira::sound::streaming::StreamingSoundData;
+
+        for bytes in [
+            include_bytes!("../assets/audio/music_base.ogg").as_slice(),
+            include_bytes!("../assets/audio/music_drive.ogg").as_slice(),
+            include_bytes!("../assets/audio/music_pressure.ogg").as_slice(),
+        ] {
+            assert!(StreamingSoundData::from_cursor(Cursor::new(bytes)).is_ok());
+        }
     }
 }

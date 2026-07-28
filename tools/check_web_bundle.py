@@ -9,6 +9,8 @@ from pathlib import Path
 
 
 LIMIT_BYTES = 3 * 1024 * 1024
+MUSIC_LIMIT_BYTES = 4 * 1024 * 1024
+MUSIC_STEMS = {"music_base.ogg", "music_drive.ogg", "music_pressure.ogg"}
 
 
 def main() -> int:
@@ -30,6 +32,20 @@ def main() -> int:
     )
     if compressed > LIMIT_BYTES:
         print("compressed critical path exceeds the mobile budget", file=sys.stderr)
+        return 1
+
+    audio_dir = dist / "audio"
+    music = {path.name: path for path in audio_dir.glob("music_*.ogg")}
+    if set(music) != MUSIC_STEMS:
+        print("production bundle has missing or unexpected music stems", file=sys.stderr)
+        return 1
+    music_bytes = sum(path.stat().st_size for path in music.values())
+    print(
+        f"music assets: {music_bytes / (1024 * 1024):.2f} MiB "
+        f"(limit {MUSIC_LIMIT_BYTES / (1024 * 1024):.0f} MiB)"
+    )
+    if music_bytes > MUSIC_LIMIT_BYTES:
+        print("music assets exceed the release budget", file=sys.stderr)
         return 1
     return 0
 

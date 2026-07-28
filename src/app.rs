@@ -5,7 +5,7 @@ use std::time::Duration;
 use eframe::egui::{self, Event, Key, Pos2, Rect, TouchId, TouchPhase};
 use web_time::Instant;
 
-use crate::audio::{AudioSystem, Cue, DEFAULT_VOLUME};
+use crate::audio::{AudioSystem, Cue, DEFAULT_EFFECTS_VOLUME, DEFAULT_MUSIC_VOLUME};
 use crate::game::{Action, Command, Game, GameConfig};
 use crate::platform;
 use crate::ui::{
@@ -16,7 +16,8 @@ use crate::ui::{
 const SIMULATION_STEP: Duration = Duration::from_nanos(1_000_000_000 / 60);
 const MAX_CATCH_UP: Duration = Duration::from_millis(250);
 const AUDIO_NOTICE_DURATION: Duration = Duration::from_millis(1_200);
-const AUDIO_VOLUME_KEY: &str = "oxidefall.audio-volume.v1";
+const AUDIO_EFFECTS_VOLUME_KEY: &str = "oxidefall.audio-volume.v1";
+const AUDIO_MUSIC_VOLUME_KEY: &str = "oxidefall.music-volume.v1";
 const AUDIO_MUTED_KEY: &str = "oxidefall.audio-muted.v1";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -86,18 +87,25 @@ pub(crate) struct OxidefallApp {
 impl OxidefallApp {
     pub(crate) fn new(context: &eframe::CreationContext<'_>) -> Self {
         configure_egui(&context.egui_ctx);
-        let volume = context
+        let effects_volume = context
             .storage
-            .and_then(|storage| storage.get_string(AUDIO_VOLUME_KEY))
+            .and_then(|storage| storage.get_string(AUDIO_EFFECTS_VOLUME_KEY))
             .and_then(|volume| volume.parse::<f32>().ok())
             .filter(|volume| volume.is_finite())
-            .unwrap_or(DEFAULT_VOLUME)
+            .unwrap_or(DEFAULT_EFFECTS_VOLUME)
+            .clamp(0.0, 1.0);
+        let music_volume = context
+            .storage
+            .and_then(|storage| storage.get_string(AUDIO_MUSIC_VOLUME_KEY))
+            .and_then(|volume| volume.parse::<f32>().ok())
+            .filter(|volume| volume.is_finite())
+            .unwrap_or(DEFAULT_MUSIC_VOLUME)
             .clamp(0.0, 1.0);
         let muted = context
             .storage
             .and_then(|storage| storage.get_string(AUDIO_MUTED_KEY))
             .is_some_and(|muted| muted == "true");
-        let app = Self::initial_state_with_audio(volume, muted);
+        let app = Self::initial_state_with_audio(effects_volume, music_volume, muted);
 
         #[cfg(feature = "qa-screenshot")]
         {
@@ -114,10 +122,10 @@ impl OxidefallApp {
 
     #[cfg(test)]
     fn initial_state() -> Self {
-        Self::initial_state_with_audio(DEFAULT_VOLUME, false)
+        Self::initial_state_with_audio(DEFAULT_EFFECTS_VOLUME, DEFAULT_MUSIC_VOLUME, false)
     }
 
-    fn initial_state_with_audio(volume: f32, muted: bool) -> Self {
+    fn initial_state_with_audio(effects_volume: f32, music_volume: f32, muted: bool) -> Self {
         Self {
             screen: Screen::Title,
             game: None,
@@ -129,7 +137,7 @@ impl OxidefallApp {
             touch_mode: platform::prefers_touch_controls(),
             viewport_orientation: None,
             effects: VisualEffects::default(),
-            audio: AudioSystem::new(volume, muted),
+            audio: AudioSystem::new(effects_volume, music_volume, muted),
             audio_controls_open: false,
             audio_notice: None,
             #[cfg(feature = "audio-lab")]
@@ -182,6 +190,7 @@ impl OxidefallApp {
         self.audio.activate();
         self.audio.stop_all();
         self.audio.play_ui(Cue::GameStart);
+        self.audio.start_music();
         self.audio_controls_open = false;
         let seed = rand::random::<u64>();
         self.game = Some(Game::new(GameConfig::default(), seed));
@@ -197,7 +206,8 @@ impl OxidefallApp {
         if self.screen == Screen::Playing {
             self.screen = Screen::Paused;
             self.clear_gameplay_input();
-            self.audio.stop_all();
+            self.audio.stop_effects();
+            self.audio.pause_music();
             if intentional {
                 self.audio.play_ui(Cue::Pause);
             }
@@ -218,6 +228,7 @@ impl OxidefallApp {
             self.pressed_keys.clear();
             self.touch_contacts.clear();
             self.audio.play_ui(Cue::Resume);
+            self.audio.resume_music();
         }
     }
 
@@ -545,18 +556,27 @@ impl OxidefallApp {
         self.accumulator += delta;
 
         while self.accumulator >= SIMULATION_STEP {
-            let (events, game_over, score) = {
+            let (events, game_over, score, level, highest_locked_row) = {
                 let Some(game) = self.game.as_mut() else {
                     break;
                 };
                 game.step();
                 let events = game.drain_events().collect::<Vec<_>>();
-                (events, game.is_game_over(), game.score())
+                (
+                    events,
+                    game.is_game_over(),
+                    game.score(),
+                    game.level(),
+                    highest_locked_row(game),
+                )
             };
             self.accumulator -= SIMULATION_STEP;
 
             let new_best = game_over && score > self.session_best;
             self.audio.observe_game_events(&events, new_best);
+            if !game_over {
+                self.audio.update_music(level, highest_locked_row, now);
+            }
             for event in &events {
                 self.effects.observe(event, now);
             }
@@ -596,12 +616,20 @@ impl OxidefallApp {
                 self.audio_controls_open = !self.audio_controls_open;
             }
             UiAction::ToggleMute => self.toggle_mute(),
-            UiAction::SetAudioVolume(volume) => {
+            UiAction::SetEffectsVolume(volume) => {
                 self.audio.activate();
-                self.audio.set_volume(volume);
+                self.audio.set_effects_volume(volume);
                 self.set_audio_notice(format!(
-                    "SOUND {}%",
-                    (self.audio.volume() * 100.0).round() as u32
+                    "EFFECTS {}%",
+                    (self.audio.effects_volume() * 100.0).round() as u32
+                ));
+            }
+            UiAction::SetMusicVolume(volume) => {
+                self.audio.activate();
+                self.audio.set_music_volume(volume);
+                self.set_audio_notice(format!(
+                    "MUSIC {}%",
+                    (self.audio.music_volume() * 100.0).round() as u32
                 ));
             }
         }
@@ -651,9 +679,14 @@ impl OxidefallApp {
             }
             AudioLabAction::Stop => self.audio.stop_all(),
             AudioLabAction::ToggleMute => self.toggle_mute(),
-            AudioLabAction::SetVolume(volume) => self.audio.set_volume(volume),
+            AudioLabAction::SetEffectsVolume(volume) => self.audio.set_effects_volume(volume),
+            AudioLabAction::SetMusicVolume(volume) => self.audio.set_music_volume(volume),
             AudioLabAction::SetRate(rate) => self.audio_lab_rate = rate,
             AudioLabAction::SetPan(pan) => self.audio_lab_pan = pan,
+            AudioLabAction::PreviewMusic(tier) => self.audio.preview_music(tier),
+            AudioLabAction::PauseMusic => self.audio.pause_music(),
+            AudioLabAction::ResumeMusic => self.audio.resume_music(),
+            AudioLabAction::DuckMusic => self.audio.preview_music_duck(),
         }
     }
 }
@@ -701,6 +734,7 @@ impl eframe::App for OxidefallApp {
         }
 
         self.advance_game(now);
+        self.audio.tick(now);
         self.effects.retain_active(now);
         let audio_notice_active = self.active_audio_notice(now).is_some();
 
@@ -715,12 +749,15 @@ impl eframe::App for OxidefallApp {
             let action = crate::ui::show_audio_lab(
                 ui,
                 AudioUiState {
-                    volume: self.audio.volume(),
+                    effects_volume: self.audio.effects_volume(),
+                    music_volume: self.audio.music_volume(),
                     muted: self.audio.is_muted(),
                     available: self.audio.is_available(),
+                    music_available: self.audio.is_music_available(),
                     controls_open: false,
                     notice: None,
                     failure_reason: self.audio.failure_reason(),
+                    music_failure_reason: self.audio.music_failure_reason(),
                 },
                 self.audio_lab_rate,
                 self.audio_lab_pan,
@@ -801,6 +838,8 @@ impl eframe::App for OxidefallApp {
         }
         if !self.audio.is_available() {
             status.push_str(" Sound is unavailable; gameplay continues silently.");
+        } else if !self.audio.is_music_available() {
+            status.push_str(" Music is unavailable; sound effects continue normally.");
         }
         self.set_accessible_status(screen, status);
 
@@ -813,12 +852,15 @@ impl eframe::App for OxidefallApp {
                 effects: &self.effects,
                 now,
                 audio: AudioUiState {
-                    volume: self.audio.volume(),
+                    effects_volume: self.audio.effects_volume(),
+                    music_volume: self.audio.music_volume(),
                     muted: self.audio.is_muted(),
                     available: self.audio.is_available(),
+                    music_available: self.audio.is_music_available(),
                     controls_open: self.audio_controls_open,
                     notice: audio_notice.as_deref(),
                     failure_reason: self.audio.failure_reason(),
+                    music_failure_reason: self.audio.music_failure_reason(),
                 },
                 touch_controls,
                 active_touch_controls: &active_touch_controls,
@@ -836,7 +878,14 @@ impl eframe::App for OxidefallApp {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        storage.set_string(AUDIO_VOLUME_KEY, self.audio.volume().to_string());
+        storage.set_string(
+            AUDIO_EFFECTS_VOLUME_KEY,
+            self.audio.effects_volume().to_string(),
+        );
+        storage.set_string(
+            AUDIO_MUSIC_VOLUME_KEY,
+            self.audio.music_volume().to_string(),
+        );
         storage.set_string(AUDIO_MUTED_KEY, self.audio.is_muted().to_string());
     }
 
@@ -868,6 +917,11 @@ fn touch_to_game_action(action: TouchControlAction) -> Action {
         TouchControlAction::RotateClockwise => Action::RotateClockwise,
         TouchControlAction::HardDrop => Action::HardDrop,
     }
+}
+
+fn highest_locked_row(game: &Game) -> Option<usize> {
+    (0..crate::game::BOARD_HEIGHT)
+        .find(|y| (0..crate::game::BOARD_WIDTH).any(|x| game.board().cell(x, *y).is_some()))
 }
 
 pub(crate) fn configure_egui(context: &egui::Context) {
@@ -1022,20 +1076,30 @@ mod tests {
     #[test]
     fn audio_preferences_restore_and_save_through_eframe_storage() {
         let mut stored = MemoryStorage::default();
-        stored.set_string(AUDIO_VOLUME_KEY, "0.42".to_owned());
+        stored.set_string(AUDIO_EFFECTS_VOLUME_KEY, "0.42".to_owned());
+        stored.set_string(AUDIO_MUSIC_VOLUME_KEY, "0.27".to_owned());
         stored.set_string(AUDIO_MUTED_KEY, "true".to_owned());
         let mut creation = eframe::CreationContext::_new_kittest(egui::Context::default());
         creation.storage = Some(&stored);
         let mut app = OxidefallApp::new(&creation);
 
-        assert!((app.audio.volume() - 0.42).abs() < f32::EPSILON);
+        assert!((app.audio.effects_volume() - 0.42).abs() < f32::EPSILON);
+        assert!((app.audio.music_volume() - 0.27).abs() < f32::EPSILON);
         assert!(app.audio.is_muted());
 
-        app.audio.set_volume(0.81);
+        app.audio.set_effects_volume(0.81);
+        app.audio.set_music_volume(0.19);
         app.audio.set_muted(false);
         let mut saved = MemoryStorage::default();
         eframe::App::save(&mut app, &mut saved);
-        assert_eq!(saved.get_string(AUDIO_VOLUME_KEY).as_deref(), Some("0.81"));
+        assert_eq!(
+            saved.get_string(AUDIO_EFFECTS_VOLUME_KEY).as_deref(),
+            Some("0.81")
+        );
+        assert_eq!(
+            saved.get_string(AUDIO_MUSIC_VOLUME_KEY).as_deref(),
+            Some("0.19")
+        );
         assert_eq!(saved.get_string(AUDIO_MUTED_KEY).as_deref(), Some("false"));
     }
 

@@ -51,15 +51,76 @@ test("loads the title screen and starts a game", async ({ page }) => {
   await expect(page.locator("#app_status")).toContainText("game in progress");
   await page.waitForFunction(() => {
     const state = window.oxidefallAudioDebugState?.();
-    return state?.available && state.ready && state.contextState === "running";
+    return (
+      state?.available &&
+      state.ready &&
+      state.musicReady &&
+      state.musicPlaying &&
+      state.contextState === "running"
+    );
   });
 
+  const beforeMute = await page.evaluate(
+    () => window.oxidefallAudioDebugState().musicPosition,
+  );
   await page.keyboard.press("m");
   await expect(page.locator("#app_status")).toContainText("SOUND MUTED");
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("oxidefall.audio-muted.v1")))
     .toBe("true");
+  await page.waitForTimeout(250);
+  const whileMuted = await page.evaluate(() => window.oxidefallAudioDebugState());
+  expect(whileMuted.muted).toBe(true);
+  expect(whileMuted.musicPosition).toBeGreaterThan(beforeMute + 0.15);
+
+  await page.keyboard.press("m");
+  await page.keyboard.press("Escape");
+  await expect(canvas).toHaveAttribute("data-screen", "paused");
+  const pausedPosition = await page.evaluate(
+    () => window.oxidefallAudioDebugState().musicPosition,
+  );
+  await page.waitForTimeout(200);
+  const stillPaused = await page.evaluate(() => window.oxidefallAudioDebugState());
+  expect(stillPaused.musicPaused).toBe(true);
+  expect(Math.abs(stillPaused.musicPosition - pausedPosition)).toBeLessThan(0.03);
+
+  await page.keyboard.press("Escape");
+  await expect(canvas).toHaveAttribute("data-screen", "playing");
+  await expect
+    .poll(() => page.evaluate(() => window.oxidefallAudioDebugState().musicPaused))
+    .toBe(false);
   expect(browserErrors).toEqual([]);
+});
+
+test("isolates missing music from sound effects and gameplay", async ({ page }) => {
+  await page.route("**/audio/music_*.ogg", (route) => route.abort());
+  await page.goto("./");
+
+  const canvas = page.locator("#oxidefall_canvas");
+  await expect(canvas).toHaveAttribute("data-screen", "title", {
+    timeout: 30_000,
+  });
+  await canvas.focus();
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => {
+    const state = window.oxidefallAudioDebugState?.();
+    return state?.ready && !state.musicAvailable;
+  });
+
+  await page.evaluate(() => {
+    const play = window.oxidefallAudioPlay;
+    window.__oxidefallMovePlays = 0;
+    window.oxidefallAudioPlay = (name, ...args) => {
+      if (name === "move_a" || name === "move_b") window.__oxidefallMovePlays += 1;
+      return play(name, ...args);
+    };
+  });
+  await page.keyboard.press("ArrowLeft");
+  await expect
+    .poll(() => page.evaluate(() => window.__oxidefallMovePlays))
+    .toBeGreaterThan(0);
+  await expect(canvas).toHaveAttribute("data-screen", "playing");
+  await expect(page.locator("#app_status")).toContainText("Music is unavailable");
 });
 
 test("gates undersized browser viewports", async ({ page }) => {
