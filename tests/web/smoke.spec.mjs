@@ -159,7 +159,7 @@ test("persists an explicit light preference across reload", async ({ page }) => 
     .poll(() => page.evaluate(() => localStorage.getItem("oxidefall.theme.v1")))
     .toBe("light");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  await expect(page.locator("#theme_color")).toHaveAttribute("content", "#ebe8df");
+  await expect(page.locator("#theme_color")).toHaveAttribute("content", "#f1efe8");
 
   await page.reload();
   await expect(canvas).toHaveAttribute("data-screen", "title", {
@@ -185,6 +185,22 @@ test("opening settings pauses and escape closes before resuming", async ({ page 
   await expect(canvas).toHaveAttribute("data-screen", "paused");
   await page.keyboard.press("Escape");
   await expect(canvas).toHaveAttribute("data-screen", "playing");
+});
+
+test("settings volume sliders support pointer and keyboard input", async ({ page }) => {
+  await setStoredTheme(page, "light");
+  await page.goto("./");
+  const canvas = page.locator("#oxidefall_canvas");
+  await expect(canvas).toHaveAttribute("data-screen", "title", {
+    timeout: 30_000,
+  });
+
+  await page.mouse.click(925, 33);
+  await expect(canvas).toHaveAttribute("data-settings-open", "true");
+  await page.mouse.click(700, 233);
+  await expect(page.locator("#app_status")).toContainText("EFFECTS 20%");
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator("#app_status")).toContainText("EFFECTS 25%");
 });
 
 test("system mode follows live browser color-scheme changes", async ({ page }) => {
@@ -214,13 +230,13 @@ test("resolves the loading shell before WebAssembly starts", async ({ page }) =>
     "data-theme-preference",
     "light",
   );
-  await expect(page.locator("#theme_color")).toHaveAttribute("content", "#ebe8df");
+  await expect(page.locator("#theme_color")).toHaveAttribute("content", "#f1efe8");
   await expect(page.locator("#loading")).toBeVisible();
   await expect
     .poll(() =>
       page.locator("body").evaluate((body) => getComputedStyle(body).backgroundColor),
     )
-    .toBe("rgb(235, 232, 223)");
+    .toBe("rgb(241, 239, 232)");
 });
 
 test("uses the compact HUD in a narrow keyboard viewport", async ({ page }) => {
@@ -410,22 +426,41 @@ for (const [name, viewport, mobile] of [
   });
 }
 
-test("matches light desktop gameplay chrome", async ({ page }) => {
-  await setStoredTheme(page, "light");
-  await page.goto("./");
-  const canvas = page.locator("#oxidefall_canvas");
-  await expect(canvas).toHaveAttribute("data-screen", "title", {
-    timeout: 30_000,
+for (const theme of ["dark", "light"]) {
+  test(`matches ${theme} desktop gameplay chrome`, async ({ page }) => {
+    await setStoredTheme(page, theme);
+    await page.goto("./");
+    const canvas = page.locator("#oxidefall_canvas");
+    await expect(canvas).toHaveAttribute("data-screen", "title", {
+      timeout: 30_000,
+    });
+    await canvas.focus();
+    await page.keyboard.press("Enter");
+    await expect(canvas).toHaveAttribute("data-screen", "playing");
+    await expect(page).toHaveScreenshot(`desktop-${theme}-gameplay-chrome.png`, {
+      animations: "disabled",
+      clip: { x: 0, y: 0, width: 960, height: 90 },
+      maxDiffPixelRatio: 0.01,
+    });
   });
-  await canvas.focus();
-  await page.keyboard.press("Enter");
-  await expect(canvas).toHaveAttribute("data-screen", "playing");
-  await expect(page).toHaveScreenshot("desktop-light-gameplay-chrome.png", {
-    animations: "disabled",
-    clip: { x: 0, y: 0, width: 960, height: 90 },
-    maxDiffPixelRatio: 0.01,
+}
+
+for (const theme of ["dark", "light"]) {
+  test(`matches ${theme} desktop settings`, async ({ page }) => {
+    await setStoredTheme(page, theme);
+    await page.goto("./");
+    const canvas = page.locator("#oxidefall_canvas");
+    await expect(canvas).toHaveAttribute("data-screen", "title", {
+      timeout: 30_000,
+    });
+    await page.mouse.click(925, 33);
+    await expect(canvas).toHaveAttribute("data-settings-open", "true");
+    await expect(page).toHaveScreenshot(`desktop-${theme}-settings.png`, {
+      animations: "disabled",
+      maxDiffPixelRatio: 0.01,
+    });
   });
-});
+}
 
 test.describe("light mobile gameplay chrome", () => {
   test.use({

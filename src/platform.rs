@@ -181,14 +181,12 @@ mod imp {
             );
         }
         if let Some(meta) = document.get_element_by_id("theme_color") {
-            let _ = meta.set_attribute(
-                "content",
-                if resolved == "dark" {
-                    "#071018"
-                } else {
-                    "#ebe8df"
-                },
-            );
+            let theme = if resolved == "dark" {
+                egui::Theme::Dark
+            } else {
+                egui::Theme::Light
+            };
+            let _ = meta.set_attribute("content", crate::theme::browser_background_hex(theme));
         }
     }
 

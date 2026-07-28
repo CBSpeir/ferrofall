@@ -453,13 +453,21 @@ orientations. Paused and game-over overlays hide all gameplay controls.
 The board always preserves square cells. The complete layout remains centered
 as the window grows.
 
-Dark mode uses a true near-black navy background, charcoal-navy surfaces,
-cool-gray text, blue-gray grid lines, standard saturated piece colors, and a
-single warm amber status accent. Light mode uses a warm off-white background,
-pale cool-gray surfaces, dark navy text, and a deeper amber accent. The board,
-Hold well, and Next wells remain deep navy in both modes so piece and ghost
-contrast stays stable. Piece colors and the amber-on-navy app icons do not
-change with the theme.
+Dark mode uses a midnight-graphite background, lifted slate surfaces, soft
+silver text, subdued blue-gray structure, standard saturated piece colors, and
+a luminous golden-amber accent. Light mode uses a pale limestone background,
+soft ivory surfaces, graphite text, cool-steel structure, and a deeper burnt
+amber accent. The board, Hold well, and Next wells remain deep navy in both
+modes so piece and ghost contrast stays stable. Piece colors do not change with
+the theme.
+
+Both modes follow the same refined industrial-console material system. Ordinary
+surfaces use flat color fields and one crisp boundary. Primary actions and
+gameplay controls retain chamfered tactile depth, while settings and secondary
+controls use quieter rounded surfaces. Hover and press feedback comes from
+light and depth; amber is reserved for primary actions, selected state, focus,
+and important results. Decorative grids remain barely perceptible, and all
+functional text meets WCAG AA contrast against its intended surface.
 
 System is the default appearance preference. It follows live platform changes
 without pausing gameplay. Explicit Light and Dark choices remain local

@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
-    <meta id="theme_color" name="theme-color" content="#071018" />
+    <meta id="theme_color" name="theme-color" content="#0d1a22" />
     <meta
       name="description"
       content="Oxidefall is a deterministic, modern falling-block puzzle game built in Rust and WebAssembly."
@@ -39,7 +39,7 @@
           document.documentElement.dataset.themePreference = preference;
           document
             .getElementById("theme_color")
-            ?.setAttribute("content", resolved === "dark" ? "#071018" : "#ebe8df");
+            ?.setAttribute("content", resolved === "dark" ? "#0d1a22" : "#f1efe8");
         }
 
         applyTheme();
@@ -78,26 +78,26 @@
 
       :root {
         color-scheme: dark;
-        --background: #071018;
-        --background-grid: rgba(28, 49, 61, 0.22);
-        --text: #dae2e6;
-        --muted: #7e94a0;
-        --accent: #e1992a;
-        --accent-bright: #ffc754;
-        --accent-glow: rgba(225, 153, 42, 0.25);
+        --background: #0d1a22;
+        --background-grid: rgba(116, 140, 151, 0.07);
+        --text: #e8eef0;
+        --muted: #9aaeb7;
+        --accent: #e8a23a;
+        --accent-bright: #f3bb5d;
+        --accent-glow: rgba(232, 162, 58, 0.2);
         font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
         background: var(--background);
       }
 
       :root[data-theme="light"] {
         color-scheme: light;
-        --background: #ebe8df;
-        --background-grid: rgba(64, 81, 89, 0.13);
-        --text: #182730;
-        --muted: #4b5e68;
-        --accent: #b7690d;
-        --accent-bright: #cf8118;
-        --accent-glow: rgba(183, 105, 13, 0.2);
+        --background: #f1efe8;
+        --background-grid: rgba(73, 89, 96, 0.07);
+        --text: #172a33;
+        --muted: #526972;
+        --accent: #b9680f;
+        --accent-bright: #cd7f1d;
+        --accent-glow: rgba(185, 104, 15, 0.16);
       }
 
       * {
