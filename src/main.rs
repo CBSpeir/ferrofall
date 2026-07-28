@@ -4,6 +4,7 @@ mod app;
 mod audio;
 mod game;
 mod platform;
+mod theme;
 mod ui;
 
 #[cfg(not(target_arch = "wasm32"))]

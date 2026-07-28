@@ -30,6 +30,12 @@ async function dispatchTouches(client, type, points) {
   });
 }
 
+async function setStoredTheme(page, preference) {
+  await page.addInitScript((value) => {
+    window.localStorage.setItem("oxidefall.theme.v1", value);
+  }, preference);
+}
+
 test("loads the title screen and starts a game", async ({ page }) => {
   const browserErrors = [];
   page.on("console", (message) => {
@@ -133,6 +139,88 @@ test("gates undersized browser viewports", async ({ page }) => {
     { timeout: 30_000 },
   );
   await expect(page.locator("#app_status")).toContainText("320 by 500");
+});
+
+test("persists an explicit light preference across reload", async ({ page }) => {
+  await page.goto("./");
+  const canvas = page.locator("#oxidefall_canvas");
+  await expect(canvas).toHaveAttribute("data-screen", "title", {
+    timeout: 30_000,
+  });
+  await expect(canvas).toHaveAttribute("data-theme-preference", "system");
+  await expect(canvas).toHaveAttribute("data-theme", "dark");
+
+  await page.mouse.click(925, 33);
+  await expect(canvas).toHaveAttribute("data-settings-open", "true");
+  await page.mouse.click(784, 114);
+  await expect(canvas).toHaveAttribute("data-theme-preference", "light");
+  await expect(canvas).toHaveAttribute("data-theme", "light");
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("oxidefall.theme.v1")))
+    .toBe("light");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.locator("#theme_color")).toHaveAttribute("content", "#ebe8df");
+
+  await page.reload();
+  await expect(canvas).toHaveAttribute("data-screen", "title", {
+    timeout: 30_000,
+  });
+  await expect(canvas).toHaveAttribute("data-theme-preference", "light");
+  await expect(canvas).toHaveAttribute("data-theme", "light");
+});
+
+test("opening settings pauses and escape closes before resuming", async ({ page }) => {
+  await page.goto("./");
+  const canvas = page.locator("#oxidefall_canvas");
+  await expect(canvas).toHaveAttribute("data-screen", "title", {
+    timeout: 30_000,
+  });
+  await canvas.focus();
+  await page.keyboard.press("Enter");
+  await expect(canvas).toHaveAttribute("data-screen", "playing");
+
+  await page.mouse.click(871, 41);
+  await expect(canvas).toHaveAttribute("data-screen", "paused");
+  await page.keyboard.press("Escape");
+  await expect(canvas).toHaveAttribute("data-screen", "paused");
+  await page.keyboard.press("Escape");
+  await expect(canvas).toHaveAttribute("data-screen", "playing");
+});
+
+test("system mode follows live browser color-scheme changes", async ({ page }) => {
+  await page.goto("./");
+  const canvas = page.locator("#oxidefall_canvas");
+  await expect(canvas).toHaveAttribute("data-screen", "title", {
+    timeout: 30_000,
+  });
+  await expect(canvas).toHaveAttribute("data-theme-preference", "system");
+  await expect(canvas).toHaveAttribute("data-theme", "dark");
+
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(canvas).toHaveAttribute("data-theme", "light");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(canvas).toHaveAttribute("data-theme", "dark");
+});
+
+test("resolves the loading shell before WebAssembly starts", async ({ page }) => {
+  await setStoredTheme(page, "light");
+  await page.route("**/*.wasm", (route) => route.abort());
+  await page.goto("./");
+
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-theme-preference",
+    "light",
+  );
+  await expect(page.locator("#theme_color")).toHaveAttribute("content", "#ebe8df");
+  await expect(page.locator("#loading")).toBeVisible();
+  await expect
+    .poll(() =>
+      page.locator("body").evaluate((body) => getComputedStyle(body).backgroundColor),
+    )
+    .toBe("rgb(235, 232, 223)");
 });
 
 test("uses the compact HUD in a narrow keyboard viewport", async ({ page }) => {
@@ -293,3 +381,76 @@ for (const [name, viewport, mobile] of [
     await context.close();
   });
 }
+
+for (const [name, viewport, mobile] of [
+  ["desktop", { width: 960, height: 720 }, false],
+  ["phone-portrait", { width: 360, height: 640 }, true],
+]) {
+  test(`matches the ${name} light title layout`, async ({ browser }) => {
+    const context = await browser.newContext({
+      viewport,
+      deviceScaleFactor: mobile ? 2 : 1,
+      hasTouch: mobile,
+      isMobile: mobile,
+      colorScheme: "dark",
+    });
+    const page = await context.newPage();
+    await setStoredTheme(page, "light");
+    await page.goto("./");
+    await expect(page.locator("#oxidefall_canvas")).toHaveAttribute(
+      "data-screen",
+      "title",
+      { timeout: 30_000 },
+    );
+    await expect(page).toHaveScreenshot(`${name}-light-title.png`, {
+      animations: "disabled",
+      maxDiffPixelRatio: 0.01,
+    });
+    await context.close();
+  });
+}
+
+test("matches light desktop gameplay chrome", async ({ page }) => {
+  await setStoredTheme(page, "light");
+  await page.goto("./");
+  const canvas = page.locator("#oxidefall_canvas");
+  await expect(canvas).toHaveAttribute("data-screen", "title", {
+    timeout: 30_000,
+  });
+  await canvas.focus();
+  await page.keyboard.press("Enter");
+  await expect(canvas).toHaveAttribute("data-screen", "playing");
+  await expect(page).toHaveScreenshot("desktop-light-gameplay-chrome.png", {
+    animations: "disabled",
+    clip: { x: 0, y: 0, width: 960, height: 90 },
+    maxDiffPixelRatio: 0.01,
+  });
+});
+
+test.describe("light mobile gameplay chrome", () => {
+  test.use({
+    viewport: { width: 360, height: 640 },
+    deviceScaleFactor: 2,
+    hasTouch: true,
+    isMobile: true,
+  });
+
+  test("matches light touch controls", async ({ page }) => {
+    await setStoredTheme(page, "light");
+    await page.goto("./");
+    const canvas = page.locator("#oxidefall_canvas");
+    await expect(canvas).toHaveAttribute("data-screen", "title", {
+      timeout: 30_000,
+    });
+    await page.touchscreen.tap(180, 339);
+    await expect(canvas).toHaveAttribute("data-screen", "playing");
+    expect(
+      await page.screenshot({
+        animations: "disabled",
+        clip: { x: 0, y: 480, width: 360, height: 160 },
+      }),
+    ).toMatchSnapshot("phone-light-controls.png", {
+      maxDiffPixelRatio: 0.01,
+    });
+  });
+});

@@ -42,6 +42,10 @@ pub(crate) fn sync_canvas_resolution() -> bool {
     imp::sync_canvas_resolution()
 }
 
+pub(crate) fn sync_theme(preference: egui::ThemePreference, resolved: egui::Theme) {
+    imp::sync_theme(preference, resolved);
+}
+
 pub(crate) fn save_best_score(score: u64) {
     imp::save_best_score(score);
 }
@@ -52,6 +56,10 @@ pub(crate) fn set_accessible_status(screen: &str, message: &str) {
 
 pub(crate) fn set_canvas_layout(layout: &str, touch_controls: bool) {
     imp::set_canvas_layout(layout, touch_controls);
+}
+
+pub(crate) fn set_canvas_settings_open(open: bool) {
+    imp::set_canvas_settings_open(open);
 }
 
 pub(crate) fn set_canvas_touch_metadata(regions: &str, active: &str) {
@@ -141,6 +149,49 @@ mod imp {
         true
     }
 
+    pub(super) fn sync_theme(preference: egui::ThemePreference, resolved: egui::Theme) {
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        if let Some(storage) = window.local_storage().ok().flatten() {
+            let _ = storage.set_item(
+                crate::theme::PREFERENCE_KEY,
+                crate::theme::preference_value(preference),
+            );
+        }
+        let Some(document) = window.document() else {
+            return;
+        };
+        let resolved = match resolved {
+            egui::Theme::Dark => "dark",
+            egui::Theme::Light => "light",
+        };
+        if let Some(root) = document.document_element() {
+            let _ = root.set_attribute("data-theme", resolved);
+            let _ = root.set_attribute(
+                "data-theme-preference",
+                crate::theme::preference_value(preference),
+            );
+        }
+        if let Some(canvas) = document.get_element_by_id(CANVAS_ID) {
+            let _ = canvas.set_attribute("data-theme", resolved);
+            let _ = canvas.set_attribute(
+                "data-theme-preference",
+                crate::theme::preference_value(preference),
+            );
+        }
+        if let Some(meta) = document.get_element_by_id("theme_color") {
+            let _ = meta.set_attribute(
+                "content",
+                if resolved == "dark" {
+                    "#071018"
+                } else {
+                    "#ebe8df"
+                },
+            );
+        }
+    }
+
     pub(super) fn load_best_score() -> u64 {
         local_storage()
             .and_then(|storage| storage.get_item(BEST_SCORE_KEY).ok().flatten())
@@ -176,6 +227,15 @@ mod imp {
                 "data-touch-controls",
                 if touch_controls { "visible" } else { "hidden" },
             );
+        }
+    }
+
+    pub(super) fn set_canvas_settings_open(open: bool) {
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        if let Some(canvas) = document.get_element_by_id(CANVAS_ID) {
+            let _ = canvas.set_attribute("data-settings-open", if open { "true" } else { "false" });
         }
     }
 
@@ -246,11 +306,15 @@ mod imp {
         false
     }
 
+    pub(super) fn sync_theme(_preference: egui::ThemePreference, _resolved: egui::Theme) {}
+
     pub(super) fn save_best_score(_score: u64) {}
 
     pub(super) fn set_accessible_status(_screen: &str, _message: &str) {}
 
     pub(super) fn set_canvas_layout(_layout: &str, _touch_controls: bool) {}
+
+    pub(super) fn set_canvas_settings_open(_open: bool) {}
 
     pub(super) fn set_canvas_touch_metadata(_regions: &str, _active: &str) {}
 

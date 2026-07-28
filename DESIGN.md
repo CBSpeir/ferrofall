@@ -25,13 +25,14 @@ The web-primary milestone includes:
 - GitHub Pages deployment; and
 - deterministic engine tests and native macOS verification;
 - original sound effects; and
-- an original adaptive score with local music, effects, and mute preferences.
+- an original adaptive score with local music, effects, and mute preferences;
+  and
+- locally persistent System, Light, and Dark appearance modes.
 
 The milestone excludes:
 
 - native persistent scores or window state;
-- general settings and control remapping;
-- alternate themes;
+- general settings beyond appearance and audio, or control remapping;
 - multiplayer;
 - replay files or visible random seeds;
 - installers and signing;
@@ -72,6 +73,8 @@ The source is divided by responsibility:
   boundary;
 - `platform.rs` isolates browser storage, input capability and viewport checks,
   accessible status, test metadata, and fullscreen behavior;
+- `theme.rs` owns stored appearance values and the semantic dark and light
+  palettes;
 - `ui.rs` owns layout, painting, overlays, and visual effects;
 - `game/mod.rs` owns simulation and the command/event API;
 - `game/board.rs` owns locked cells, collision, and row compaction;
@@ -321,8 +324,11 @@ not pause play.
 The web build stores its best score in same-origin `localStorage`. It uses a
 versioned key, tolerates unavailable or malformed storage, and has no account
 or server synchronization. The native build retains a session-only best score.
-Both targets persist the effects volume, music volume, and global mute
-preference through eframe storage. No game state is persisted.
+Both targets persist the effects volume, music volume, global mute preference,
+and System, Light, or Dark appearance preference through eframe storage. Theme
+values use a versioned key and fall back to System when storage is missing,
+unavailable, or malformed. System uses Dark when the platform cannot report a
+preference. No game state is persisted.
 
 The web shell keeps a visually hidden semantic status synchronized with the
 canvas screen so assistive technology and browser smoke tests can identify the
@@ -384,8 +390,9 @@ The mix follows these rules:
 - no more than 16 voices may play simultaneously.
 
 Effects default to 70 percent and music to 35 percent. Their independent
-sliders use a perceptual gain curve. A speaker control is available on title
-and game screens, including during active play. `M` toggles a global mute and
+sliders use a perceptual gain curve. A settings control is available on title
+and game screens and contains appearance and sound controls. Its gear icon
+shows a persistent muted badge when applicable. `M` toggles a global mute and
 produces a short visual and accessible status confirmation. Muting preserves
 the logical music timeline so unmuting rejoins the current position. Audio
 never carries gameplay information that is absent visually.
@@ -446,9 +453,26 @@ orientations. Paused and game-over overlays hide all gameplay controls.
 The board always preserves square cells. The complete layout remains centered
 as the window grows.
 
-The palette uses a true near-black navy background, charcoal-navy surfaces,
+Dark mode uses a true near-black navy background, charcoal-navy surfaces,
 cool-gray text, blue-gray grid lines, standard saturated piece colors, and a
-single warm amber status accent.
+single warm amber status accent. Light mode uses a warm off-white background,
+pale cool-gray surfaces, dark navy text, and a deeper amber accent. The board,
+Hold well, and Next wells remain deep navy in both modes so piece and ghost
+contrast stays stable. Piece colors and the amber-on-navy app icons do not
+change with the theme.
+
+System is the default appearance preference. It follows live platform changes
+without pausing gameplay. Explicit Light and Dark choices remain local
+overrides. Theme changes apply atomically without animation. The static web
+loader, failure state, browser theme color, egui canvas, clear color, and native
+window decorations all use the resolved theme from their first paint.
+
+The top-right settings popover presents explicit System, Light, and Dark
+single-select buttons and reports the effective theme under System. It remains
+keyboard and screen-reader accessible but has no direct theme-cycle shortcut.
+Opening it during active play pauses immediately. The gear, an outside click,
+or Escape closes it without resuming; another Escape resumes. A passive System
+theme change does not pause play.
 
 Gameplay visuals are procedural egui primitives. The app locally bundles Saira
 Condensed ExtraBold for the wordmark and major headings, and IBM Plex Mono
@@ -492,6 +516,8 @@ The web-primary milestone is complete only when:
 - keyboard and touch title-to-playing interactions, orientation pause,
   simultaneous contacts, responsive snapshots, and the undersized-viewport
   gate pass in headless Chromium;
+- appearance persistence, first-paint loader matching, Light and Dark visual
+  coverage, and live System changes pass in headless Chromium;
 - current desktop Safari and Firefox receive manual launch checks;
 - one physical iPhone and one physical Android phone pass portrait, landscape,
   multi-touch, held release, orientation, audio, safe-area, browser-chrome,

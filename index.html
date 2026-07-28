@@ -6,12 +6,50 @@
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#071018" />
+    <meta id="theme_color" name="theme-color" content="#071018" />
     <meta
       name="description"
       content="Oxidefall is a deterministic, modern falling-block puzzle game built in Rust and WebAssembly."
     />
     <title>Oxidefall</title>
+
+    <script>
+      (() => {
+        const preferenceKey = "oxidefall.theme.v1";
+        const systemQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+        function readPreference() {
+          try {
+            const stored = window.localStorage.getItem(preferenceKey);
+            return stored === "light" || stored === "dark" ? stored : "system";
+          } catch {
+            return "system";
+          }
+        }
+
+        function applyTheme() {
+          const preference = readPreference();
+          const resolved =
+            preference === "system"
+              ? systemQuery.matches
+                ? "dark"
+                : "light"
+              : preference;
+          document.documentElement.dataset.theme = resolved;
+          document.documentElement.dataset.themePreference = preference;
+          document
+            .getElementById("theme_color")
+            ?.setAttribute("content", resolved === "dark" ? "#071018" : "#ebe8df");
+        }
+
+        applyTheme();
+        if (systemQuery.addEventListener) {
+          systemQuery.addEventListener("change", applyTheme);
+        } else {
+          systemQuery.addListener(applyTheme);
+        }
+      })();
+    </script>
 
     <base data-trunk-public-url />
     <link data-trunk rel="rust" data-wasm-opt="0" />
@@ -40,8 +78,26 @@
 
       :root {
         color-scheme: dark;
+        --background: #071018;
+        --background-grid: rgba(28, 49, 61, 0.22);
+        --text: #dae2e6;
+        --muted: #7e94a0;
+        --accent: #e1992a;
+        --accent-bright: #ffc754;
+        --accent-glow: rgba(225, 153, 42, 0.25);
         font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-        background: #071018;
+        background: var(--background);
+      }
+
+      :root[data-theme="light"] {
+        color-scheme: light;
+        --background: #ebe8df;
+        --background-grid: rgba(64, 81, 89, 0.13);
+        --text: #182730;
+        --muted: #4b5e68;
+        --accent: #b7690d;
+        --accent-bright: #cf8118;
+        --accent-glow: rgba(183, 105, 13, 0.2);
       }
 
       * {
@@ -66,9 +122,9 @@
 
       body {
         background:
-          linear-gradient(rgba(28, 49, 61, 0.22) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(28, 49, 61, 0.22) 1px, transparent 1px),
-          #071018;
+          linear-gradient(var(--background-grid) 1px, transparent 1px),
+          linear-gradient(90deg, var(--background-grid) 1px, transparent 1px),
+          var(--background);
         background-size: 32px 32px;
       }
 
@@ -97,7 +153,7 @@
         display: grid;
         place-content: center;
         gap: 22px;
-        color: #dae2e6;
+        color: var(--text);
         text-align: center;
         letter-spacing: 0.12em;
         padding:
@@ -119,7 +175,7 @@
       #loading p {
         max-width: 32rem;
         margin: 0;
-        color: #7e94a0;
+        color: var(--muted);
         font-size: 0.8rem;
         line-height: 1.6;
       }
@@ -130,12 +186,12 @@
         grid-template-rows: repeat(4, 14px);
         justify-content: center;
         gap: 2px;
-        filter: drop-shadow(0 0 16px rgba(225, 153, 42, 0.25));
+        filter: drop-shadow(0 0 16px var(--accent-glow));
       }
 
       .loader_mark span {
-        border: 1px solid #ffc754;
-        background: #e1992a;
+        border: 1px solid var(--accent-bright);
+        background: var(--accent);
         animation: pulse 1.4s ease-in-out infinite alternate;
       }
 
@@ -238,6 +294,7 @@
         data-touch-controls="hidden"
         data-touch-regions=""
         data-touch-active=""
+        data-settings-open="false"
       ></canvas>
       <section id="loading" aria-live="polite">
         <div class="loader_mark" aria-hidden="true">

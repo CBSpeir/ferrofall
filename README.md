@@ -72,11 +72,15 @@ or navigating away abandons the active run without a confirmation dialog.
 Oxidefall has no accounts, analytics, cookies, service worker, or remote
 telemetry.
 
-The speaker control opens separate Music and Effects sliders. `M` globally
-mutes or restores both without resetting the music timeline. Both volumes and
-the mute state are stored locally. Music starts with gameplay, follows level
-and stack danger, and suspends at the current position when the game pauses.
-Audio starts only after player interaction and never blocks gameplay.
+The settings control offers System, Light, and Dark appearance modes alongside
+separate Music and Effects sliders. System follows live operating-system theme
+changes, while explicit choices override them. Appearance, both volumes, and
+the mute state are stored locally. Opening settings during a run pauses the
+game; closing settings never resumes automatically. `M` globally mutes or
+restores audio without resetting the music timeline. Music starts with
+gameplay, follows level and stack danger, and suspends at the current position
+when the game pauses. Audio starts only after player interaction and never
+blocks gameplay.
 
 ## Gameplay
 

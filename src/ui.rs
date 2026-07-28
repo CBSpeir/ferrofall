@@ -16,23 +16,10 @@ use crate::game::{
     preview_offsets,
 };
 use crate::platform::BrowserSupportIssue;
+use crate::theme::{Palette, preference_label, theme_label};
 
-const BACKGROUND: Color32 = Color32::from_rgb(7, 16, 24);
-const SURFACE: Color32 = Color32::from_rgb(13, 26, 36);
-const SURFACE_DEEP: Color32 = Color32::from_rgb(8, 18, 27);
-const GRID: Color32 = Color32::from_rgb(30, 51, 64);
-const BORDER: Color32 = Color32::from_rgb(76, 99, 112);
-const TEXT: Color32 = Color32::from_rgb(218, 226, 230);
-const MUTED: Color32 = Color32::from_rgb(126, 148, 160);
-const AMBER: Color32 = Color32::from_rgb(225, 153, 42);
-const AMBER_BRIGHT: Color32 = Color32::from_rgb(244, 177, 66);
-const BUTTON_HOUSING: Color32 = Color32::from_rgb(3, 9, 15);
-const BUTTON_FACE: Color32 = Color32::from_rgb(10, 23, 33);
-const BUTTON_FACE_HOVER: Color32 = Color32::from_rgb(18, 36, 47);
 pub(crate) const DISPLAY_FONT_FAMILY: &str = "oxidefall-display";
 const WORDMARK_TRACKING_EM: f32 = 0.045;
-const BUTTON_FACE_ACTIVE: Color32 = Color32::from_rgb(28, 48, 59);
-const BUTTON_EDGE_HOVER: Color32 = Color32::from_rgb(135, 158, 169);
 const LINE_FLASH_DURATION: Duration = Duration::from_millis(150);
 const DROP_TRAIL_DURATION: Duration = Duration::from_millis(120);
 const BUTTON_ACTIVATION_DURATION: f64 = 0.12;
@@ -55,7 +42,9 @@ pub(crate) enum UiAction {
     Resume,
     Restart,
     MainMenu,
-    ToggleAudioControls,
+    ToggleSettings,
+    CloseSettings,
+    SetTheme(egui::ThemePreference),
     ToggleMute,
     SetEffectsVolume(f32),
     SetMusicVolume(f32),
@@ -157,8 +146,6 @@ pub(crate) struct AudioUiState<'a> {
     pub(crate) muted: bool,
     pub(crate) available: bool,
     pub(crate) music_available: bool,
-    pub(crate) controls_open: bool,
-    pub(crate) notice: Option<&'a str>,
     pub(crate) failure_reason: Option<&'a str>,
     pub(crate) music_failure_reason: Option<&'a str>,
 }
@@ -168,6 +155,9 @@ pub(crate) struct UiState<'a> {
     pub(crate) session_best: u64,
     pub(crate) effects: &'a VisualEffects,
     pub(crate) now: Instant,
+    pub(crate) theme_preference: egui::ThemePreference,
+    pub(crate) settings_open: bool,
+    pub(crate) notice: Option<&'a str>,
     pub(crate) audio: AudioUiState<'a>,
     pub(crate) touch_controls: bool,
     pub(crate) active_touch_controls: &'a [TouchControlAction],
@@ -248,8 +238,9 @@ impl VisualEffects {
 }
 
 pub(crate) fn show(ui: &mut egui::Ui, screen: Screen, state: UiState<'_>) -> UiOutput {
+    let colors = Palette::for_theme(ui.ctx().theme());
     let rect = ui.max_rect();
-    ui.painter().rect_filled(rect, 0.0, BACKGROUND);
+    ui.painter().rect_filled(rect, 0.0, colors.background);
     paint_background_grid(ui.painter(), rect);
 
     let layout_mode = layout_mode(rect, state.touch_controls);
@@ -264,16 +255,9 @@ pub(crate) fn show(ui: &mut egui::Ui, screen: Screen, state: UiState<'_>) -> UiO
         }
     };
 
-    let audio_action = show_audio_control(
-        ui,
-        rect,
-        screen,
-        state.audio,
-        layout_mode,
-        state.touch_controls,
-    );
-    let action = if audio_action != UiAction::None {
-        audio_action
+    let settings_action = show_settings_control(ui, rect, screen, &state, layout_mode);
+    let action = if settings_action != UiAction::None {
+        settings_action
     } else {
         action
     };
@@ -289,9 +273,10 @@ pub(crate) fn show(ui: &mut egui::Ui, screen: Screen, state: UiState<'_>) -> UiO
 }
 
 pub(crate) fn show_browser_support_issue(ui: &mut egui::Ui, issue: BrowserSupportIssue) {
+    let colors = Palette::for_theme(ui.ctx().theme());
     let rect = ui.max_rect();
     let painter = ui.painter().clone();
-    painter.rect_filled(rect, 0.0, BACKGROUND);
+    painter.rect_filled(rect, 0.0, colors.background);
     paint_background_grid(&painter, rect);
 
     let center = rect.center();
@@ -307,14 +292,14 @@ pub(crate) fn show_browser_support_issue(ui: &mut egui::Ui, issue: BrowserSuppor
         Align2::CENTER_CENTER,
         heading,
         display_font(34.0),
-        TEXT,
+        colors.text,
     );
     painter.text(
         pos2(center.x, center.y + 42.0),
         Align2::CENTER_CENTER,
         detail,
         label_font(14.0),
-        MUTED,
+        colors.muted,
     );
 }
 
@@ -325,8 +310,9 @@ pub(crate) fn show_audio_lab(
     rate: f32,
     pan: f32,
 ) -> AudioLabAction {
+    let colors = Palette::for_theme(ui.ctx().theme());
     let rect = ui.max_rect();
-    ui.painter().rect_filled(rect, 0.0, BACKGROUND);
+    ui.painter().rect_filled(rect, 0.0, colors.background);
     paint_background_grid(ui.painter(), rect);
     let mut action = AudioLabAction::None;
     let mut effects_volume = audio.effects_volume;
@@ -339,12 +325,12 @@ pub(crate) fn show_audio_lab(
         ui.label(
             RichText::new("OXIDEFALL AUDIO LAB")
                 .font(display_font(30.0))
-                .color(TEXT),
+                .color(colors.text),
         );
         ui.label(
             RichText::new("Development-only cue and compound-event auditioning")
                 .font(label_font(11.0))
-                .color(MUTED),
+                .color(colors.muted),
         );
         ui.add_space(14.0);
 
@@ -352,19 +338,27 @@ pub(crate) fn show_audio_lab(
             ui.label(
                 RichText::new(audio.failure_reason.unwrap_or("Audio output unavailable"))
                     .font(label_font(11.0))
-                    .color(AMBER),
+                    .color(colors.accent_text),
             );
         }
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new("EFFECTS").font(label_font(10.0)).color(MUTED));
+            ui.label(
+                RichText::new("EFFECTS")
+                    .font(label_font(10.0))
+                    .color(colors.muted),
+            );
             if ui
                 .add(egui::Slider::new(&mut effects_volume, 0.0..=1.0).show_value(true))
                 .changed()
             {
                 action = AudioLabAction::SetEffectsVolume(effects_volume);
             }
-            ui.label(RichText::new("MUSIC").font(label_font(10.0)).color(MUTED));
+            ui.label(
+                RichText::new("MUSIC")
+                    .font(label_font(10.0))
+                    .color(colors.muted),
+            );
             if ui
                 .add_enabled(
                     audio.music_available,
@@ -389,14 +383,22 @@ pub(crate) fn show_audio_lab(
             }
         });
         ui.horizontal(|ui| {
-            ui.label(RichText::new("RATE").font(label_font(10.0)).color(MUTED));
+            ui.label(
+                RichText::new("RATE")
+                    .font(label_font(10.0))
+                    .color(colors.muted),
+            );
             if ui
                 .add(egui::Slider::new(&mut preview_rate, 0.75..=1.25).show_value(true))
                 .changed()
             {
                 action = AudioLabAction::SetRate(preview_rate);
             }
-            ui.label(RichText::new("PAN").font(label_font(10.0)).color(MUTED));
+            ui.label(
+                RichText::new("PAN")
+                    .font(label_font(10.0))
+                    .color(colors.muted),
+            );
             if ui
                 .add(egui::Slider::new(&mut preview_pan, -0.35..=0.35).show_value(true))
                 .changed()
@@ -429,7 +431,7 @@ pub(crate) fn show_audio_lab(
         ui.label(
             RichText::new("ADAPTIVE MUSIC")
                 .font(label_font(11.0))
-                .color(MUTED),
+                .color(colors.muted),
         );
         if !audio.music_available {
             ui.label(
@@ -439,7 +441,7 @@ pub(crate) fn show_audio_lab(
                         .unwrap_or("Music assets unavailable"),
                 )
                 .font(label_font(10.0))
-                .color(AMBER),
+                .color(colors.accent_text),
             );
         }
         ui.horizontal(|ui| {
@@ -477,7 +479,7 @@ pub(crate) fn show_audio_lab(
         ui.label(
             RichText::new("COMPOUND EVENTS")
                 .font(label_font(11.0))
-                .color(MUTED),
+                .color(colors.muted),
         );
         ui.horizontal(|ui| {
             if ui.button("HARD DROP + T-SPIN COMBO").clicked() {
@@ -496,6 +498,7 @@ pub(crate) fn show_audio_lab(
 }
 
 fn show_title(ui: &mut egui::Ui, rect: Rect, touch_controls: bool) -> UiAction {
+    let colors = Palette::for_theme(ui.ctx().theme());
     let painter = ui.painter().clone();
     let center = rect.center();
     let compact = layout_mode(rect, touch_controls) != LayoutMode::Desktop;
@@ -522,7 +525,7 @@ fn show_title(ui: &mut egui::Ui, rect: Rect, touch_controls: bool) -> UiAction {
         Align2::CENTER_CENTER,
         "OXIDEFALL",
         if compact { 40.0 } else { 52.0 },
-        TEXT,
+        colors.text,
     );
 
     let play_y = if compact {
@@ -564,7 +567,7 @@ fn show_title(ui: &mut egui::Ui, rect: Rect, touch_controls: bool) -> UiAction {
             "ENTER  PLAY    ·    ESC  PAUSE    ·    R  RESTART    ·    M  MUTE"
         },
         label_font(if compact { 10.0 } else { 12.0 }),
-        MUTED,
+        colors.muted,
     );
 
     if play {
@@ -588,6 +591,7 @@ fn show_game(
     layout_mode: LayoutMode,
     state: &UiState<'_>,
 ) -> UiAction {
+    let colors = Palette::for_theme(ui.ctx().theme());
     let layout = GameLayout::new(rect, layout_mode);
     let painter = ui.painter().clone();
 
@@ -601,7 +605,7 @@ fn show_game(
         } else {
             23.0
         },
-        TEXT,
+        colors.text,
     );
     let header_button = if layout_mode == LayoutMode::Desktop {
         vec2(38.0, 34.0)
@@ -665,7 +669,7 @@ fn show_game(
 
 fn paint_background_grid(painter: &Painter, rect: Rect) {
     let spacing = 32.0;
-    let color = Color32::from_rgba_unmultiplied(28, 49, 61, 70);
+    let color = Palette::for_theme(painter.ctx().theme()).background_grid;
     let mut x = rect.left();
     while x <= rect.right() {
         painter.line_segment(
@@ -697,19 +701,25 @@ fn paint_falling_mark(painter: &Painter, center: Pos2, cell: f32) {
 }
 
 fn paint_left_rail(painter: &Painter, rect: Rect, game: &Game, session_best: u64) {
+    let colors = Palette::for_theme(painter.ctx().theme());
     painter.text(
         rect.left_top(),
         Align2::LEFT_TOP,
         "HOLD",
         label_font(14.0),
-        MUTED,
+        colors.muted,
     );
     let hold_rect = Rect::from_min_max(
         pos2(rect.left(), rect.top() + 28.0),
         pos2(rect.right(), rect.top() + 118.0),
     );
-    painter.rect_filled(hold_rect, 2.0, SURFACE_DEEP);
-    painter.rect_stroke(hold_rect, 2.0, Stroke::new(1.0, BORDER), StrokeKind::Inside);
+    painter.rect_filled(hold_rect, 2.0, colors.well);
+    painter.rect_stroke(
+        hold_rect,
+        2.0,
+        Stroke::new(1.0, colors.border),
+        StrokeKind::Inside,
+    );
     if let Some(kind) = game.held_piece() {
         paint_preview_piece(
             painter,
@@ -738,7 +748,7 @@ fn paint_left_rail(painter: &Painter, rect: Rect, game: &Game, session_best: u64
             Align2::LEFT_TOP,
             format!("COMBO ×{combo}"),
             label_font(13.0),
-            AMBER,
+            colors.accent_text,
         );
         y += 31.0;
     }
@@ -748,12 +758,13 @@ fn paint_left_rail(painter: &Painter, rect: Rect, game: &Game, session_best: u64
             Align2::LEFT_TOP,
             "BACK-TO-BACK",
             label_font(12.0),
-            AMBER,
+            colors.accent_text,
         );
     }
 }
 
 fn paint_compact_left_rail(painter: &Painter, rect: Rect, game: &Game, session_best: u64) {
+    let colors = Palette::for_theme(painter.ctx().theme());
     let label_size = (rect.width() * 0.145).clamp(8.0, 11.0);
     let value_size = (rect.width() * 0.24).clamp(12.0, 18.0);
     painter.text(
@@ -761,7 +772,7 @@ fn paint_compact_left_rail(painter: &Painter, rect: Rect, game: &Game, session_b
         Align2::LEFT_TOP,
         "HOLD",
         label_font(label_size),
-        MUTED,
+        colors.muted,
     );
     let hold_height = (rect.width() * 0.92)
         .clamp(48.0, 82.0)
@@ -770,8 +781,13 @@ fn paint_compact_left_rail(painter: &Painter, rect: Rect, game: &Game, session_b
         pos2(rect.left(), rect.top() + label_size + 8.0),
         vec2(rect.width(), hold_height),
     );
-    painter.rect_filled(hold_rect, 2.0, SURFACE_DEEP);
-    painter.rect_stroke(hold_rect, 2.0, Stroke::new(1.0, BORDER), StrokeKind::Inside);
+    painter.rect_filled(hold_rect, 2.0, colors.well);
+    painter.rect_stroke(
+        hold_rect,
+        2.0,
+        Stroke::new(1.0, colors.border),
+        StrokeKind::Inside,
+    );
     if let Some(kind) = game.held_piece() {
         paint_preview_piece(
             painter,
@@ -802,14 +818,14 @@ fn paint_compact_left_rail(painter: &Painter, rect: Rect, game: &Game, session_b
             Align2::LEFT_TOP,
             label,
             label_font(label_size),
-            MUTED,
+            colors.muted,
         );
         painter.text(
             pos2(rect.left(), top + label_size + 4.0),
             Align2::LEFT_TOP,
             value,
             number_font(value_size),
-            TEXT,
+            colors.text,
         );
     }
 
@@ -820,7 +836,7 @@ fn paint_compact_left_rail(painter: &Painter, rect: Rect, game: &Game, session_b
             Align2::LEFT_BOTTOM,
             "B2B",
             label_font(label_size),
-            AMBER,
+            colors.accent_text,
         );
         status_y -= label_size + 4.0;
     }
@@ -830,26 +846,32 @@ fn paint_compact_left_rail(painter: &Painter, rect: Rect, game: &Game, session_b
             Align2::LEFT_BOTTOM,
             format!("COMBO ×{combo}"),
             label_font(label_size),
-            AMBER,
+            colors.accent_text,
         );
     }
 }
 
 fn paint_landscape_left_rail(painter: &Painter, rect: Rect, game: &Game, session_best: u64) {
+    let colors = Palette::for_theme(painter.ctx().theme());
     let label_size = 9.0;
     painter.text(
         rect.left_top(),
         Align2::LEFT_TOP,
         "HOLD",
         label_font(label_size),
-        MUTED,
+        colors.muted,
     );
     let hold_rect = Rect::from_min_size(
         pos2(rect.left(), rect.top() + 16.0),
         vec2((rect.width() * 0.36).clamp(58.0, 76.0), 56.0),
     );
-    painter.rect_filled(hold_rect, 2.0, SURFACE_DEEP);
-    painter.rect_stroke(hold_rect, 2.0, Stroke::new(1.0, BORDER), StrokeKind::Inside);
+    painter.rect_filled(hold_rect, 2.0, colors.well);
+    painter.rect_stroke(
+        hold_rect,
+        2.0,
+        Stroke::new(1.0, colors.border),
+        StrokeKind::Inside,
+    );
     if let Some(kind) = game.held_piece() {
         paint_preview_piece(
             painter,
@@ -899,36 +921,38 @@ fn paint_landscape_left_rail(painter: &Painter, rect: Rect, game: &Game, session
             Align2::LEFT_BOTTOM,
             status.join("  ·  "),
             label_font(9.0),
-            AMBER,
+            colors.accent_text,
         );
     }
 }
 
 fn paint_landscape_stat(painter: &Painter, pos: Pos2, label: &str, value: String) {
-    painter.text(pos, Align2::LEFT_TOP, label, label_font(8.5), MUTED);
+    let colors = Palette::for_theme(painter.ctx().theme());
+    painter.text(pos, Align2::LEFT_TOP, label, label_font(8.5), colors.muted);
     painter.text(
         pos2(pos.x, pos.y + 13.0),
         Align2::LEFT_TOP,
         value,
         number_font(15.0),
-        TEXT,
+        colors.text,
     );
 }
 
 fn paint_stat(painter: &Painter, rect: Rect, y: f32, label: &str, value: String) -> f32 {
+    let colors = Palette::for_theme(painter.ctx().theme());
     painter.text(
         pos2(rect.left(), y),
         Align2::LEFT_TOP,
         label,
         label_font(11.0),
-        MUTED,
+        colors.muted,
     );
     painter.text(
         pos2(rect.left(), y + 17.0),
         Align2::LEFT_TOP,
         value,
         number_font(22.0),
-        TEXT,
+        colors.text,
     );
     let separator_y = y + 48.0;
     painter.line_segment(
@@ -936,18 +960,19 @@ fn paint_stat(painter: &Painter, rect: Rect, y: f32, label: &str, value: String)
             pos2(rect.left(), separator_y),
             pos2(rect.right(), separator_y),
         ],
-        Stroke::new(1.0, GRID),
+        Stroke::new(1.0, colors.divider),
     );
     y + 60.0
 }
 
 fn paint_next_rail(painter: &Painter, rect: Rect, game: &Game) {
+    let colors = Palette::for_theme(painter.ctx().theme());
     painter.text(
         rect.left_top(),
         Align2::LEFT_TOP,
         "NEXT",
         label_font(14.0),
-        MUTED,
+        colors.muted,
     );
     let top = rect.top() + 28.0;
     let gap = 8.0;
@@ -960,8 +985,8 @@ fn paint_next_rail(painter: &Painter, rect: Rect, game: &Game) {
                 top + index as f32 * (slot_height + gap) + slot_height,
             ),
         );
-        painter.rect_filled(slot, 2.0, SURFACE_DEEP);
-        painter.rect_stroke(slot, 2.0, Stroke::new(1.0, GRID), StrokeKind::Inside);
+        painter.rect_filled(slot, 2.0, colors.well);
+        painter.rect_stroke(slot, 2.0, Stroke::new(1.0, colors.grid), StrokeKind::Inside);
         paint_preview_piece(
             painter,
             kind,
@@ -973,13 +998,14 @@ fn paint_next_rail(painter: &Painter, rect: Rect, game: &Game) {
 }
 
 fn paint_compact_next_rail(painter: &Painter, rect: Rect, game: &Game, horizontal: bool) {
+    let colors = Palette::for_theme(painter.ctx().theme());
     let label_size = if horizontal { 9.0 } else { 10.0 };
     painter.text(
         rect.left_top(),
         Align2::LEFT_TOP,
         "NEXT",
         label_font(label_size),
-        MUTED,
+        colors.muted,
     );
     let content = Rect::from_min_max(
         pos2(rect.left(), rect.top() + label_size + 8.0),
@@ -1003,8 +1029,8 @@ fn paint_compact_next_rail(painter: &Painter, rect: Rect, game: &Game, horizonta
                 vec2(content.width(), height),
             )
         };
-        painter.rect_filled(slot, 2.0, SURFACE_DEEP);
-        painter.rect_stroke(slot, 2.0, Stroke::new(1.0, GRID), StrokeKind::Inside);
+        painter.rect_filled(slot, 2.0, colors.well);
+        painter.rect_stroke(slot, 2.0, Stroke::new(1.0, colors.grid), StrokeKind::Inside);
         paint_preview_piece(
             painter,
             kind,
@@ -1016,28 +1042,29 @@ fn paint_compact_next_rail(painter: &Painter, rect: Rect, game: &Game, horizonta
 }
 
 fn paint_board(painter: &Painter, rect: Rect, game: &Game, effects: &VisualEffects, now: Instant) {
-    painter.rect_filled(rect.expand(6.0), 2.0, SURFACE);
+    let colors = Palette::for_theme(painter.ctx().theme());
+    painter.rect_filled(rect.expand(6.0), 2.0, colors.surface);
     painter.rect_stroke(
         rect.expand(6.0),
         2.0,
-        Stroke::new(1.5, BORDER),
+        Stroke::new(1.5, colors.border),
         StrokeKind::Inside,
     );
-    painter.rect_filled(rect, 0.0, SURFACE_DEEP);
+    painter.rect_filled(rect, 0.0, colors.well);
     let cell = rect.width() / BOARD_WIDTH as f32;
 
     for x in 0..=BOARD_WIDTH {
         let line_x = rect.left() + x as f32 * cell;
         painter.line_segment(
             [pos2(line_x, rect.top()), pos2(line_x, rect.bottom())],
-            Stroke::new(0.75, GRID),
+            Stroke::new(0.75, colors.grid),
         );
     }
     for y in 0..=VISIBLE_HEIGHT {
         let line_y = rect.top() + y as f32 * cell;
         painter.line_segment(
             [pos2(rect.left(), line_y), pos2(rect.right(), line_y)],
-            Stroke::new(0.75, GRID),
+            Stroke::new(0.75, colors.grid),
         );
     }
 
@@ -1207,6 +1234,7 @@ fn paint_preview_piece(painter: &Painter, kind: Tetromino, center: Pos2, cell: f
 }
 
 fn paint_controls(painter: &Painter, rect: Rect) {
+    let colors = Palette::for_theme(painter.ctx().theme());
     let controls = [
         ("← →", "MOVE"),
         ("↓", "SOFT DROP"),
@@ -1226,21 +1254,26 @@ fn paint_controls(painter: &Painter, rect: Rect) {
             pos2(center_x - total_width / 2.0, rect.center().y - 12.0),
             vec2(key_width, 24.0),
         );
-        painter.rect_filled(key_rect, 1.0, SURFACE_DEEP);
-        painter.rect_stroke(key_rect, 1.0, Stroke::new(1.0, BORDER), StrokeKind::Inside);
+        painter.rect_filled(key_rect, 1.0, colors.button_face);
+        painter.rect_stroke(
+            key_rect,
+            1.0,
+            Stroke::new(1.0, colors.border),
+            StrokeKind::Inside,
+        );
         painter.text(
             key_rect.center(),
             Align2::CENTER_CENTER,
             key,
             label_font(9.5),
-            TEXT,
+            colors.text,
         );
         painter.text(
             pos2(key_rect.right() + 7.0, rect.center().y),
             Align2::LEFT_CENTER,
             label,
             label_font(8.5),
-            MUTED,
+            colors.muted,
         );
     }
 }
@@ -1595,17 +1628,18 @@ fn paint_rotation_icon(painter: &Painter, rect: Rect, clockwise: bool, color: Co
     ));
 }
 
-fn show_audio_control(
+fn show_settings_control(
     ui: &mut egui::Ui,
     rect: Rect,
     screen: Screen,
-    audio: AudioUiState<'_>,
+    state: &UiState<'_>,
     layout_mode: LayoutMode,
-    touch_controls: bool,
 ) -> UiAction {
+    let colors = Palette::for_theme(ui.ctx().theme());
+    let audio = state.audio;
     let button_rect = match screen {
         Screen::Title => {
-            let size = if touch_controls {
+            let size = if state.touch_controls {
                 Vec2::splat(48.0)
             } else {
                 vec2(38.0, 34.0)
@@ -1627,34 +1661,22 @@ fn show_audio_control(
     let response = ui
         .interact(
             button_rect,
-            ui.make_persistent_id("audio_control_button"),
-            if audio.available {
-                egui::Sense::click()
-            } else {
-                egui::Sense::hover()
-            },
+            ui.make_persistent_id("settings_control_button"),
+            egui::Sense::click(),
         )
-        .on_hover_text(if audio.available {
-            if !audio.music_available {
-                audio
-                    .music_failure_reason
-                    .unwrap_or("Music unavailable; effects remain available")
-            } else if audio.muted {
-                "Sound muted (M)"
-            } else {
-                "Sound volume (M to mute)"
-            }
+        .on_hover_text(if audio.muted {
+            "Settings, sound muted"
         } else {
-            audio.failure_reason.unwrap_or("Sound unavailable")
+            "Settings"
         });
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
-            audio.available,
+            true,
             if audio.muted {
-                "Sound muted"
+                "Settings, sound muted"
             } else {
-                "Sound volume"
+                "Settings"
             },
         )
     });
@@ -1667,24 +1689,24 @@ fn show_audio_control(
         ButtonShape::Rounded {
             radius: (button_rect.height() * 0.14).clamp(4.0, 7.0),
         },
-        false,
-        audio.available,
+        state.settings_open,
+        true,
     );
-    paint_speaker_icon(
+    paint_settings_icon(
         ui.painter(),
         face_rect,
         audio.muted || (audio.effects_volume <= 0.0 && audio.music_volume <= 0.0),
         foreground,
     );
 
-    if let Some(notice) = audio.notice {
+    if let Some(notice) = state.notice {
         let notice_rect =
-            Rect::from_center_size(pos2(rect.center().x, rect.top() + 42.0), vec2(190.0, 30.0));
-        ui.painter().rect_filled(notice_rect, 2.0, SURFACE);
+            Rect::from_center_size(pos2(rect.center().x, rect.top() + 42.0), vec2(230.0, 30.0));
+        ui.painter().rect_filled(notice_rect, 2.0, colors.surface);
         ui.painter().rect_stroke(
             notice_rect,
             2.0,
-            Stroke::new(1.0, BORDER),
+            Stroke::new(1.0, colors.border),
             StrokeKind::Inside,
         );
         ui.painter().text(
@@ -1692,86 +1714,175 @@ fn show_audio_control(
             Align2::CENTER_CENTER,
             notice,
             label_font(11.0),
-            TEXT,
+            colors.text,
         );
     }
 
-    if response.clicked() && audio.available {
-        return UiAction::ToggleAudioControls;
+    if response.clicked() {
+        return UiAction::ToggleSettings;
     }
-    if !audio.controls_open || !audio.available {
+    if !state.settings_open {
         return UiAction::None;
     }
 
-    let panel_width = 270.0_f32.min(rect.width() - 16.0);
+    let panel_width = 320.0_f32.min(rect.width() - 16.0);
+    let panel_height = 244.0_f32.min(rect.height() - 16.0);
     let panel_left = (button_rect.right() - panel_width)
         .clamp(rect.left() + 8.0, rect.right() - panel_width - 8.0);
-    let panel = Rect::from_min_size(
-        pos2(panel_left, button_rect.bottom() + 8.0),
-        vec2(panel_width, 170.0),
+    let panel_top =
+        (button_rect.bottom() + 8.0).clamp(rect.top() + 8.0, rect.bottom() - panel_height - 8.0);
+    let panel = Rect::from_min_size(pos2(panel_left, panel_top), vec2(panel_width, panel_height));
+    ui.painter().rect_filled(panel, 3.0, colors.surface);
+    ui.painter().rect_stroke(
+        panel,
+        3.0,
+        Stroke::new(1.0, colors.border),
+        StrokeKind::Inside,
     );
-    ui.painter().rect_filled(panel, 3.0, SURFACE);
-    ui.painter()
-        .rect_stroke(panel, 3.0, Stroke::new(1.0, BORDER), StrokeKind::Inside);
     ui.painter().text(
         pos2(panel.left() + 14.0, panel.top() + 14.0),
         Align2::LEFT_TOP,
+        "APPEARANCE",
+        label_font(11.0),
+        colors.muted,
+    );
+
+    let option_gap = 6.0;
+    let option_top = panel.top() + 32.0;
+    let option_width = (panel.width() - 28.0 - option_gap * 2.0) / 3.0;
+    let mut theme_action = UiAction::None;
+    for (index, preference) in [
+        egui::ThemePreference::System,
+        egui::ThemePreference::Light,
+        egui::ThemePreference::Dark,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let option_rect = Rect::from_min_size(
+            pos2(
+                panel.left() + 14.0 + index as f32 * (option_width + option_gap),
+                option_top,
+            ),
+            vec2(option_width, 48.0),
+        );
+        if theme_option_button(
+            ui,
+            option_rect,
+            preference_label(preference),
+            preference == state.theme_preference,
+        ) {
+            theme_action = UiAction::SetTheme(preference);
+        }
+    }
+
+    let resolved = ui.ctx().theme();
+    ui.painter().text(
+        pos2(panel.left() + 14.0, panel.top() + 88.0),
+        Align2::LEFT_TOP,
+        if state.theme_preference == egui::ThemePreference::System {
+            format!("FOLLOWING SYSTEM · {}", theme_label(resolved))
+        } else {
+            format!("USING {}", theme_label(resolved))
+        },
+        label_font(9.0),
+        colors.muted,
+    );
+    ui.painter().line_segment(
+        [
+            pos2(panel.left() + 14.0, panel.top() + 106.0),
+            pos2(panel.right() - 14.0, panel.top() + 106.0),
+        ],
+        Stroke::new(1.0, colors.divider),
+    );
+    ui.painter().text(
+        pos2(panel.left() + 14.0, panel.top() + 117.0),
+        Align2::LEFT_TOP,
         "SOUND",
         label_font(11.0),
-        MUTED,
+        colors.muted,
     );
+    if !audio.available {
+        let unavailable_rect = Rect::from_min_size(
+            pos2(panel.left() + 86.0, panel.top() + 110.0),
+            vec2(panel.width() - 206.0, 34.0),
+        );
+        ui.painter().text(
+            unavailable_rect.center(),
+            Align2::CENTER_CENTER,
+            "UNAVAILABLE",
+            label_font(9.0),
+            colors.accent_text,
+        );
+        ui.interact(
+            unavailable_rect,
+            ui.make_persistent_id("audio_unavailable_status"),
+            egui::Sense::hover(),
+        )
+        .on_hover_text(audio.failure_reason.unwrap_or("Audio output unavailable"));
+    }
     let mute_rect = Rect::from_min_size(
-        pos2(panel.right() - 104.0, panel.top() + 10.0),
-        vec2(90.0, 26.0),
+        pos2(panel.right() - 106.0, panel.top() + 110.0),
+        vec2(92.0, 34.0),
     );
     let mute = ui
-        .push_id("audio_mute_button", |ui| {
-            styled_button(
-                ui,
-                mute_rect,
-                if audio.muted { "UNMUTE" } else { "MUTE" },
-                false,
-            )
+        .add_enabled_ui(audio.available, |ui| {
+            ui.push_id("audio_mute_button", |ui| {
+                styled_button(
+                    ui,
+                    mute_rect,
+                    if audio.muted { "UNMUTE" } else { "MUTE" },
+                    false,
+                )
+            })
+            .inner
         })
         .inner;
 
     let mut effects_volume = audio.effects_volume;
-    let effects_label_y = panel.top() + 48.0;
+    let effects_label_y = panel.top() + 148.0;
     ui.painter().text(
         pos2(panel.left() + 14.0, effects_label_y),
         Align2::LEFT_TOP,
         "EFFECTS",
         label_font(10.0),
-        MUTED,
+        colors.muted,
     );
     ui.painter().text(
         pos2(panel.right() - 14.0, effects_label_y),
         Align2::RIGHT_TOP,
         format!("{}%", (effects_volume * 100.0).round() as u32),
         label_font(10.0),
-        TEXT,
+        colors.text,
     );
     let effects_slider_rect = Rect::from_min_size(
-        pos2(panel.left() + 14.0, panel.top() + 64.0),
+        pos2(panel.left() + 14.0, panel.top() + 162.0),
         vec2(panel.width() - 28.0, 26.0),
     );
     let effects_slider = ui
         .push_id("effects_volume_slider", |ui| {
-            ui.put(
-                effects_slider_rect,
-                egui::Slider::new(&mut effects_volume, 0.0..=1.0).show_value(false),
-            )
+            ui.add_enabled_ui(audio.available, |ui| {
+                ui.put(
+                    effects_slider_rect,
+                    egui::Slider::new(&mut effects_volume, 0.0..=1.0).show_value(false),
+                )
+            })
+            .inner
         })
         .inner;
 
     let mut music_volume = audio.music_volume;
-    let music_label_y = panel.top() + 94.0;
+    let music_label_y = panel.top() + 195.0;
     ui.painter().text(
         pos2(panel.left() + 14.0, music_label_y),
         Align2::LEFT_TOP,
         "MUSIC",
         label_font(10.0),
-        if audio.music_available { MUTED } else { AMBER },
+        if audio.music_available {
+            colors.muted
+        } else {
+            colors.accent_text
+        },
     );
     ui.painter().text(
         pos2(panel.right() - 14.0, music_label_y),
@@ -1782,12 +1893,31 @@ fn show_audio_control(
             "UNAVAILABLE".to_owned()
         },
         label_font(10.0),
-        if audio.music_available { TEXT } else { AMBER },
+        if audio.music_available {
+            colors.text
+        } else {
+            colors.accent_text
+        },
     );
     let music_slider_rect = Rect::from_min_size(
-        pos2(panel.left() + 14.0, panel.top() + 110.0),
+        pos2(panel.left() + 14.0, panel.top() + 209.0),
         vec2(panel.width() - 28.0, 26.0),
     );
+    if !audio.music_available {
+        ui.interact(
+            Rect::from_min_max(
+                pos2(panel.left() + 14.0, music_label_y),
+                pos2(panel.right() - 14.0, music_label_y + 14.0),
+            ),
+            ui.make_persistent_id("music_unavailable_status"),
+            egui::Sense::hover(),
+        )
+        .on_hover_text(
+            audio
+                .music_failure_reason
+                .unwrap_or("Music unavailable; effects remain available"),
+        );
+    }
     let music_slider = ui
         .push_id("music_volume_slider", |ui| {
             ui.add_enabled_ui(audio.music_available, |ui| {
@@ -1799,73 +1929,81 @@ fn show_audio_control(
             .inner
         })
         .inner;
-    ui.painter().text(
-        pos2(panel.left() + 14.0, panel.bottom() - 13.0),
-        Align2::LEFT_BOTTOM,
-        "M toggles all audio",
-        label_font(9.0),
-        MUTED,
-    );
+    let clicked_outside = ui.input(|input| {
+        input.pointer.any_click()
+            && input.pointer.interact_pos().is_some_and(|position| {
+                !panel.contains(position) && !button_rect.contains(position)
+            })
+    });
 
-    if effects_slider.changed() {
+    if theme_action != UiAction::None {
+        theme_action
+    } else if effects_slider.changed() {
         UiAction::SetEffectsVolume(effects_volume)
     } else if music_slider.changed() {
         UiAction::SetMusicVolume(music_volume)
     } else if mute {
         UiAction::ToggleMute
+    } else if clicked_outside {
+        UiAction::CloseSettings
     } else {
         UiAction::None
     }
 }
 
-fn paint_speaker_icon(painter: &Painter, rect: Rect, muted: bool, color: Color32) {
+fn theme_option_button(ui: &mut egui::Ui, rect: Rect, label: &'static str, active: bool) -> bool {
+    let response = ui.interact(
+        rect,
+        ui.make_persistent_id(("theme_option", label)),
+        egui::Sense::click(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, active, label)
+    });
+    let (face_rect, foreground) = paint_button_surface(
+        ui,
+        rect,
+        &response,
+        ButtonEmphasis::Accent,
+        ButtonShape::Clipped { cut: 4.0 },
+        active,
+        true,
+    );
+    ui.painter().text(
+        face_rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        label_font(10.0),
+        foreground,
+    );
+    response.clicked()
+}
+
+fn paint_settings_icon(painter: &Painter, rect: Rect, muted: bool, color: Color32) {
     let center = rect.center();
-    let body = Rect::from_center_size(pos2(center.x - 5.5, center.y), vec2(5.0, 8.0));
-    painter.rect_filled(body, 0.0, color);
-    painter.line_segment(
-        [body.right_top(), pos2(center.x + 1.0, center.y - 6.0)],
-        Stroke::new(1.5, color),
-    );
-    painter.line_segment(
-        [body.right_bottom(), pos2(center.x + 1.0, center.y + 6.0)],
-        Stroke::new(1.5, color),
-    );
-    painter.line_segment(
-        [
-            pos2(center.x + 1.0, center.y - 6.0),
-            pos2(center.x + 1.0, center.y + 6.0),
-        ],
-        Stroke::new(1.5, color),
-    );
+    let outer_radius = (rect.height() * 0.22).clamp(6.0, 9.0);
+    painter.circle_stroke(center, outer_radius, Stroke::new(1.8, color));
+    painter.circle_stroke(center, outer_radius * 0.35, Stroke::new(1.6, color));
+    for index in 0..8 {
+        let angle = index as f32 * std::f32::consts::TAU / 8.0;
+        let direction = vec2(angle.cos(), angle.sin());
+        painter.line_segment(
+            [
+                center + direction * (outer_radius + 0.5),
+                center + direction * (outer_radius + 3.0),
+            ],
+            Stroke::new(1.8, color),
+        );
+    }
+
     if muted {
+        let colors = Palette::for_theme(painter.ctx().theme());
+        let badge = pos2(rect.right() - 3.5, rect.bottom() - 3.5);
+        painter.circle_filled(badge, 6.5, colors.surface);
+        painter.circle_stroke(badge, 6.0, Stroke::new(1.2, colors.accent));
         painter.line_segment(
-            [
-                pos2(center.x + 5.0, center.y - 5.0),
-                pos2(center.x + 12.0, center.y + 5.0),
-            ],
-            Stroke::new(1.5, AMBER),
-        );
-        painter.line_segment(
-            [
-                pos2(center.x + 12.0, center.y - 5.0),
-                pos2(center.x + 5.0, center.y + 5.0),
-            ],
-            Stroke::new(1.5, AMBER),
-        );
-    } else {
-        painter.line_segment(
-            [
-                pos2(center.x + 5.0, center.y - 4.0),
-                pos2(center.x + 8.0, center.y),
-            ],
-            Stroke::new(1.3, color),
-        );
-        painter.line_segment(
-            [
-                pos2(center.x + 8.0, center.y),
-                pos2(center.x + 5.0, center.y + 4.0),
-            ],
-            Stroke::new(1.3, color),
+            [badge + vec2(-2.8, -2.8), badge + vec2(2.8, 2.8)],
+            Stroke::new(1.6, colors.accent),
         );
     }
 }
@@ -1876,8 +2014,8 @@ enum Overlay {
 }
 
 fn paint_overlay(ui: &mut egui::Ui, rect: Rect, overlay: Overlay) -> UiAction {
-    ui.painter()
-        .rect_filled(rect, 0.0, Color32::from_black_alpha(205));
+    let colors = Palette::for_theme(ui.ctx().theme());
+    ui.painter().rect_filled(rect, 0.0, colors.overlay_scrim);
     let center = rect.center();
     let panel = Rect::from_center_size(
         center,
@@ -1886,9 +2024,13 @@ fn paint_overlay(ui: &mut egui::Ui, rect: Rect, overlay: Overlay) -> UiAction {
             330.0_f32.min(rect.height() - 16.0),
         ),
     );
-    ui.painter().rect_filled(panel, 3.0, SURFACE);
-    ui.painter()
-        .rect_stroke(panel, 3.0, Stroke::new(1.0, BORDER), StrokeKind::Inside);
+    ui.painter().rect_filled(panel, 3.0, colors.surface);
+    ui.painter().rect_stroke(
+        panel,
+        3.0,
+        Stroke::new(1.0, colors.border),
+        StrokeKind::Inside,
+    );
 
     let (title, first_label, first_action, second_label, second_action, has_third) = match overlay {
         Overlay::Paused => (
@@ -1913,7 +2055,7 @@ fn paint_overlay(ui: &mut egui::Ui, rect: Rect, overlay: Overlay) -> UiAction {
         Align2::CENTER_CENTER,
         title,
         display_font(32.0),
-        TEXT,
+        colors.text,
     );
 
     if let Overlay::GameOver { score, best } = overlay {
@@ -1926,7 +2068,7 @@ fn paint_overlay(ui: &mut egui::Ui, rect: Rect, overlay: Overlay) -> UiAction {
                 format_number(best)
             ),
             label_font(12.0),
-            MUTED,
+            colors.muted,
         );
     }
 
@@ -1976,6 +2118,7 @@ fn paint_button_surface(
     active: bool,
     enabled: bool,
 ) -> (Rect, Color32) {
+    let colors = Palette::for_theme(ui.ctx().theme());
     let pressed = enabled && (active || response.is_pointer_button_down_on());
     let hover_amount = ui.ctx().animate_bool_with_time(
         response.id.with("button_hover"),
@@ -2000,44 +2143,44 @@ fn paint_button_surface(
     let (rest_fill, hover_fill, pressed_fill, rest_edge, hover_edge, mut foreground) =
         match emphasis {
             ButtonEmphasis::Primary => (
-                AMBER,
-                AMBER_BRIGHT,
+                colors.accent,
+                colors.accent_bright,
                 Color32::from_rgb(200, 127, 25),
-                AMBER,
-                AMBER_BRIGHT,
-                BACKGROUND,
+                colors.accent,
+                colors.accent_bright,
+                colors.accent_foreground,
             ),
             ButtonEmphasis::Accent if active => (
-                AMBER,
-                AMBER_BRIGHT,
+                colors.accent,
+                colors.accent_bright,
                 Color32::from_rgb(200, 127, 25),
-                AMBER,
-                AMBER_BRIGHT,
-                BACKGROUND,
+                colors.accent,
+                colors.accent_bright,
+                colors.accent_foreground,
             ),
             ButtonEmphasis::Accent => (
-                BUTTON_FACE,
-                BUTTON_FACE_HOVER,
-                BUTTON_FACE_ACTIVE,
-                AMBER,
-                AMBER_BRIGHT,
-                TEXT,
+                colors.button_face,
+                colors.button_face_hover,
+                colors.button_face_active,
+                colors.accent,
+                colors.accent_bright,
+                colors.text,
             ),
             ButtonEmphasis::Neutral => (
                 if active {
-                    BUTTON_FACE_ACTIVE
+                    colors.button_face_active
                 } else {
-                    BUTTON_FACE
+                    colors.button_face
                 },
-                BUTTON_FACE_HOVER,
-                BUTTON_FACE_ACTIVE,
-                if active { TEXT } else { BORDER },
-                BUTTON_EDGE_HOVER,
-                TEXT,
+                colors.button_face_hover,
+                colors.button_face_active,
+                if active { colors.text } else { colors.border },
+                colors.button_edge_hover,
+                colors.text,
             ),
         };
     if !enabled {
-        foreground = MUTED;
+        foreground = colors.muted;
     }
 
     let mut face_fill = rest_fill.lerp_to_gamma(hover_fill, hover_amount);
@@ -2046,19 +2189,19 @@ fn paint_button_surface(
         face_fill = pressed_fill;
     }
     if activation_amount > 0.0 {
-        edge = edge.lerp_to_gamma(AMBER_BRIGHT, activation_amount);
+        edge = edge.lerp_to_gamma(colors.accent_bright, activation_amount);
     }
     if !enabled {
-        face_fill = BUTTON_FACE.gamma_multiply(0.68);
-        edge = GRID;
+        face_fill = colors.button_face.gamma_multiply(0.68);
+        edge = colors.divider;
     }
 
     paint_button_shape(
         ui.painter(),
         rect,
         shape,
-        BUTTON_HOUSING,
-        Stroke::new(1.0, Color32::from_rgb(22, 39, 49)),
+        colors.button_housing,
+        Stroke::new(1.0, colors.button_housing_edge),
     );
 
     let lift = if pressed { 1.5 } else { -0.8 * hover_amount };
@@ -2095,7 +2238,7 @@ fn paint_button_surface(
     paint_button_highlight(ui.painter(), face_rect, face_shape, highlight);
 
     if response.has_focus() {
-        paint_focus_brackets(ui.painter(), rect, AMBER_BRIGHT);
+        paint_focus_brackets(ui.painter(), rect, colors.accent_bright);
     }
 
     (face_rect, foreground)
@@ -2477,14 +2620,15 @@ mod tests {
                         session_best: 0,
                         effects: &VisualEffects::default(),
                         now: Instant::now(),
+                        theme_preference: egui::ThemePreference::System,
+                        settings_open: false,
+                        notice: None,
                         audio: AudioUiState {
                             effects_volume: 0.7,
                             music_volume: 0.35,
                             muted: false,
                             available: true,
                             music_available: true,
-                            controls_open: false,
-                            notice: None,
                             failure_reason: None,
                             music_failure_reason: None,
                         },
