@@ -6,6 +6,8 @@ deterministic engine and interface also build as a native desktop app. An
 original adaptive industrial-electronic score and sound effects provide
 optional audio on both targets.
 
+![Oxidefall gameplay][gameplay]
+
 ## Run the website locally
 
 Install the current stable Rust toolchain, the WebAssembly target, and
@@ -137,3 +139,4 @@ Open Font License 1.1. Their license texts and source details are in
 [`assets/fonts`](assets/fonts/README.md).
 
 [trunk]: https://trunk-rs.github.io/trunk/
+[gameplay]: assets/gameplay.png
