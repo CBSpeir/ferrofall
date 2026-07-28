@@ -1,5 +1,10 @@
 # Oxidefall
 
+[![Build status][build-badge]][build]
+[![Play Oxidefall online][play-badge]][play]
+[![MIT or Apache 2.0 license][license-badge]][license]
+[![Built with Rust and WebAssembly][technology-badge]][technology]
+
 Oxidefall is a falling-block puzzle game written in Rust. Its primary release
 is a static WebAssembly website rendered with `eframe` and egui. The same
 deterministic engine and interface also build as a native desktop app. An
@@ -138,5 +143,13 @@ Saira Condensed ExtraBold and IBM Plex Mono Medium are bundled under the SIL
 Open Font License 1.1. Their license texts and source details are in
 [`assets/fonts`](assets/fonts/README.md).
 
-[trunk]: https://trunk-rs.github.io/trunk/
+[build-badge]: https://img.shields.io/github/actions/workflow/status/CBSpeir/oxidefall/web.yml?branch=master&style=flat-square&logo=github&label=build
+[build]: https://github.com/CBSpeir/oxidefall/actions/workflows/web.yml
 [gameplay]: assets/gameplay.png
+[license-badge]: https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-0d1a22?style=flat-square
+[license]: #license
+[play-badge]: https://img.shields.io/badge/Play%20Online-b9680f?style=flat-square
+[play]: https://oxidefall.fyi
+[technology-badge]: https://img.shields.io/badge/Rust%20%2B%20WebAssembly-0d1a22?style=flat-square&logo=rust&logoColor=white
+[technology]: Cargo.toml
+[trunk]: https://trunk-rs.github.io/trunk/
