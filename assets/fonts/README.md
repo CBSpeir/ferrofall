@@ -1,6 +1,6 @@
 # Bundled fonts
 
-Ferrofall bundles two font files from the Google Fonts repository:
+Oxidefall bundles two font files from the Google Fonts repository:
 
 - Saira Condensed ExtraBold for the wordmark and major headings;
 - IBM Plex Mono Medium for controls, labels, statistics, and numbers.

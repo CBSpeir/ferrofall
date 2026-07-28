@@ -117,16 +117,16 @@
     }
   }
 
-  window.ferrofallAudioAvailable = () => !failed;
-  window.ferrofallAudioPrepare = prepareBank;
-  window.ferrofallAudioActivate = activate;
-  window.ferrofallAudioSetMasterVolume = (volume) => {
+  window.oxidefallAudioAvailable = () => !failed;
+  window.oxidefallAudioPrepare = prepareBank;
+  window.oxidefallAudioActivate = activate;
+  window.oxidefallAudioSetMasterVolume = (volume) => {
     masterVolume = Math.max(0, Math.min(1, Number(volume) || 0));
     if (master && context) {
       master.gain.setTargetAtTime(masterVolume, context.currentTime, 0.015);
     }
   };
-  window.ferrofallAudioPlay = (name, gainDb, rate, pan, delaySeconds) => {
+  window.oxidefallAudioPlay = (name, gainDb, rate, pan, delaySeconds) => {
     if (!activate()) return;
     const buffer = buffers.get(name);
     if (!buffer || !master || masterVolume <= 0) return;
@@ -161,8 +161,8 @@
     activeSources.add(source);
     source.start(context.currentTime + Math.max(0, Number(delaySeconds) || 0));
   };
-  window.ferrofallAudioStopAll = stopAll;
-  window.ferrofallAudioDebugState = () => ({
+  window.oxidefallAudioStopAll = stopAll;
+  window.oxidefallAudioDebugState = () => ({
     available: !failed,
     ready: decodeComplete && buffers.size === stems.length,
     activeVoices: activeSources.size,

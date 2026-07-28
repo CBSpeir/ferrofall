@@ -1,5 +1,5 @@
 [package]
-name = "ferrofall"
+name = "oxidefall"
 version = "0.1.0"
 edition = "2024"
 description = "A deterministic falling-block puzzle game for web and desktop"

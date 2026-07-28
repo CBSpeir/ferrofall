@@ -1,5 +1,5 @@
 {
-  "name": "ferrofall-web-tests",
+  "name": "oxidefall-web-tests",
   "private": true,
   "scripts": {
     "test:web": "playwright test"

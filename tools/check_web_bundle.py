@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Enforce Ferrofall's compressed critical-path budget."""
+"""Enforce Oxidefall's compressed critical-path budget."""
 
 from __future__ import annotations
 

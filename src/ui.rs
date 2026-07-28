@@ -29,7 +29,7 @@ const AMBER_BRIGHT: Color32 = Color32::from_rgb(244, 177, 66);
 const BUTTON_HOUSING: Color32 = Color32::from_rgb(3, 9, 15);
 const BUTTON_FACE: Color32 = Color32::from_rgb(10, 23, 33);
 const BUTTON_FACE_HOVER: Color32 = Color32::from_rgb(18, 36, 47);
-pub(crate) const DISPLAY_FONT_FAMILY: &str = "ferrofall-display";
+pub(crate) const DISPLAY_FONT_FAMILY: &str = "oxidefall-display";
 const WORDMARK_TRACKING_EM: f32 = 0.045;
 const BUTTON_FACE_ACTIVE: Color32 = Color32::from_rgb(28, 48, 59);
 const BUTTON_EDGE_HOVER: Color32 = Color32::from_rgb(135, 158, 169);
@@ -327,7 +327,7 @@ pub(crate) fn show_audio_lab(
     ui.vertical_centered(|ui| {
         ui.add_space(22.0);
         ui.label(
-            RichText::new("FERROFALL AUDIO LAB")
+            RichText::new("OXIDEFALL AUDIO LAB")
                 .font(display_font(30.0))
                 .color(TEXT),
         );
@@ -452,7 +452,7 @@ fn show_title(ui: &mut egui::Ui, rect: Rect, touch_controls: bool) -> UiAction {
             },
         ),
         Align2::CENTER_CENTER,
-        "FERROFALL",
+        "OXIDEFALL",
         if compact { 40.0 } else { 52.0 },
         TEXT,
     );
@@ -527,7 +527,7 @@ fn show_game(
         &painter,
         layout.header.left_top(),
         Align2::LEFT_TOP,
-        "FERROFALL",
+        "OXIDEFALL",
         if layout_mode == LayoutMode::Desktop {
             30.0
         } else {

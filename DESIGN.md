@@ -1,11 +1,11 @@
-# Ferrofall Design Specification
+# Oxidefall Design Specification
 
 This document records the decision-complete web-primary milestone for
-Ferrofall. Implementation and tests should treat it as the source of truth.
+Oxidefall. Implementation and tests should treat it as the source of truth.
 
 ## Product scope
 
-Ferrofall is a polished, single-player falling-block puzzle game. Its primary
+Oxidefall is a polished, single-player falling-block puzzle game. Its primary
 release is a static WebAssembly website. A native desktop build remains
 supported from the shared Rust codebase. Both targets use a
 guideline-inspired modern ruleset and a restrained arcade interface.
@@ -188,7 +188,7 @@ Soft drop does not bypass lock delay. Hard drop does.
 
 ## Rotation and T-spins
 
-Ferrofall supports clockwise and counterclockwise rotation. It does not
+Oxidefall supports clockwise and counterclockwise rotation. It does not
 support 180-degree rotation.
 
 JLSTZ pieces use the standard SRS kick table. The I piece uses its separate SRS

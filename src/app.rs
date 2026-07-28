@@ -16,8 +16,8 @@ use crate::ui::{
 const SIMULATION_STEP: Duration = Duration::from_nanos(1_000_000_000 / 60);
 const MAX_CATCH_UP: Duration = Duration::from_millis(250);
 const AUDIO_NOTICE_DURATION: Duration = Duration::from_millis(1_200);
-const AUDIO_VOLUME_KEY: &str = "ferrofall.audio-volume.v1";
-const AUDIO_MUTED_KEY: &str = "ferrofall.audio-muted.v1";
+const AUDIO_VOLUME_KEY: &str = "oxidefall.audio-volume.v1";
+const AUDIO_MUTED_KEY: &str = "oxidefall.audio-muted.v1";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ViewportOrientation {
@@ -60,7 +60,7 @@ impl TouchBinding {
     }
 }
 
-pub(crate) struct FerrofallApp {
+pub(crate) struct OxidefallApp {
     screen: Screen,
     game: Option<Game>,
     session_best: u64,
@@ -83,7 +83,7 @@ pub(crate) struct FerrofallApp {
     accessible_status: String,
 }
 
-impl FerrofallApp {
+impl OxidefallApp {
     pub(crate) fn new(context: &eframe::CreationContext<'_>) -> Self {
         configure_egui(&context.egui_ctx);
         let volume = context
@@ -102,7 +102,7 @@ impl FerrofallApp {
         #[cfg(feature = "qa-screenshot")]
         {
             let mut app = app;
-            if std::env::var_os("FERROFALL_QA_TITLE").is_none() {
+            if std::env::var_os("OXIDEFALL_QA_TITLE").is_none() {
                 app.prepare_screenshot_state();
             }
             app
@@ -658,7 +658,7 @@ impl FerrofallApp {
     }
 }
 
-impl eframe::App for FerrofallApp {
+impl eframe::App for OxidefallApp {
     fn logic(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         let now = Instant::now();
         let resolution_changed = platform::sync_canvas_resolution();
@@ -734,7 +734,7 @@ impl eframe::App for FerrofallApp {
             let (screen, status) = match issue {
                 platform::BrowserSupportIssue::ViewportTooSmall => (
                     "viewport-too-small",
-                    "Ferrofall needs a safe viewport of at least 320 by 500 pixels, or 500 by 320 in landscape.",
+                    "Oxidefall needs a safe viewport of at least 320 by 500 pixels, or 500 by 320 in landscape.",
                 ),
             };
             platform::set_canvas_layout("unsupported", false);
@@ -768,29 +768,29 @@ impl eframe::App for FerrofallApp {
             Screen::Title => (
                 "title",
                 if touch_controls {
-                    "Ferrofall title screen. Tap Play to begin with two-thumb controls.".to_owned()
+                    "Oxidefall title screen. Tap Play to begin with two-thumb controls.".to_owned()
                 } else {
-                    "Ferrofall title screen. Press Enter or choose Play to begin.".to_owned()
+                    "Oxidefall title screen. Press Enter or choose Play to begin.".to_owned()
                 },
             ),
             Screen::Playing => (
                 "playing",
                 if touch_controls {
-                    "Ferrofall game in progress. Use the labeled touch controls or tap Pause."
+                    "Oxidefall game in progress. Use the labeled touch controls or tap Pause."
                         .to_owned()
                 } else {
-                    "Ferrofall game in progress. Press Escape to pause.".to_owned()
+                    "Oxidefall game in progress. Press Escape to pause.".to_owned()
                 },
             ),
             Screen::Paused => (
                 "paused",
-                "Ferrofall paused. Press Escape to resume.".to_owned(),
+                "Oxidefall paused. Press Escape to resume.".to_owned(),
             ),
             Screen::GameOver => {
                 let score = self.game.as_ref().map_or(0, Game::score);
                 (
                     "game-over",
-                    format!("Ferrofall game over. Final score: {score}."),
+                    format!("Oxidefall game over. Final score: {score}."),
                 )
             }
         };
@@ -947,7 +947,7 @@ mod tests {
 
     #[test]
     fn title_play_movement_focus_pause_and_resume_form_a_complete_path() {
-        let mut app = FerrofallApp::initial_state();
+        let mut app = OxidefallApp::initial_state();
         assert_eq!(app.screen, Screen::Title);
 
         assert!(app.handle_screen_key(Key::Enter));
@@ -998,7 +998,7 @@ mod tests {
 
     #[test]
     fn recording_a_higher_score_updates_session_best() {
-        let mut app = FerrofallApp::initial_state();
+        let mut app = OxidefallApp::initial_state();
         app.record_best_score(12_345);
         assert_eq!(app.session_best, 12_345);
 
@@ -1008,7 +1008,7 @@ mod tests {
 
     #[test]
     fn mute_key_is_global_and_never_maps_to_gameplay() {
-        let mut app = FerrofallApp::initial_state();
+        let mut app = OxidefallApp::initial_state();
         assert!(!app.audio.is_muted());
 
         assert!(app.handle_screen_key(Key::M));
@@ -1026,7 +1026,7 @@ mod tests {
         stored.set_string(AUDIO_MUTED_KEY, "true".to_owned());
         let mut creation = eframe::CreationContext::_new_kittest(egui::Context::default());
         creation.storage = Some(&stored);
-        let mut app = FerrofallApp::new(&creation);
+        let mut app = OxidefallApp::new(&creation);
 
         assert!((app.audio.volume() - 0.42).abs() < f32::EPSILON);
         assert!(app.audio.is_muted());
@@ -1041,7 +1041,7 @@ mod tests {
 
     #[test]
     fn touch_movement_can_slide_between_directions() {
-        let mut app = FerrofallApp::initial_state();
+        let mut app = OxidefallApp::initial_state();
         app.start_game();
         let viewport = Rect::from_min_size(Pos2::ZERO, egui::vec2(360.0, 640.0));
         let controls =
@@ -1105,7 +1105,7 @@ mod tests {
 
     #[test]
     fn hard_drop_requires_release_inside_its_control() {
-        let mut app = FerrofallApp::initial_state();
+        let mut app = OxidefallApp::initial_state();
         app.start_game();
         let viewport = Rect::from_min_size(Pos2::ZERO, egui::vec2(360.0, 640.0));
         let controls =
@@ -1129,7 +1129,7 @@ mod tests {
 
     #[test]
     fn rotation_fires_on_touch_start_without_repeating() {
-        let mut app = FerrofallApp::initial_state();
+        let mut app = OxidefallApp::initial_state();
         app.start_game();
         let viewport = Rect::from_min_size(Pos2::ZERO, egui::vec2(360.0, 640.0));
         let controls =
@@ -1191,7 +1191,7 @@ mod tests {
 
     #[test]
     fn touch_orientation_change_pauses_and_clears_input() {
-        let mut app = FerrofallApp::initial_state();
+        let mut app = OxidefallApp::initial_state();
         app.touch_mode = true;
         app.start_game();
         app.handle_viewport_orientation(Rect::from_min_size(Pos2::ZERO, egui::vec2(360.0, 640.0)));

@@ -38,9 +38,9 @@ test("loads the title screen and starts a game", async ({ page }) => {
   page.on("pageerror", (error) => browserErrors.push(error.message));
 
   await page.goto("./");
-  await expect(page).toHaveTitle("Ferrofall");
+  await expect(page).toHaveTitle("Oxidefall");
 
-  const canvas = page.locator("#ferrofall_canvas");
+  const canvas = page.locator("#oxidefall_canvas");
   await expect(canvas).toHaveAttribute("data-screen", "title", {
     timeout: 30_000,
   });
@@ -50,14 +50,14 @@ test("loads the title screen and starts a game", async ({ page }) => {
   await expect(canvas).toHaveAttribute("data-screen", "playing");
   await expect(page.locator("#app_status")).toContainText("game in progress");
   await page.waitForFunction(() => {
-    const state = window.ferrofallAudioDebugState?.();
+    const state = window.oxidefallAudioDebugState?.();
     return state?.available && state.ready && state.contextState === "running";
   });
 
   await page.keyboard.press("m");
   await expect(page.locator("#app_status")).toContainText("SOUND MUTED");
   await expect
-    .poll(() => page.evaluate(() => localStorage.getItem("ferrofall.audio-muted.v1")))
+    .poll(() => page.evaluate(() => localStorage.getItem("oxidefall.audio-muted.v1")))
     .toBe("true");
   expect(browserErrors).toEqual([]);
 });
@@ -66,7 +66,7 @@ test("gates undersized browser viewports", async ({ page }) => {
   await page.setViewportSize({ width: 300, height: 480 });
   await page.goto("./");
 
-  await expect(page.locator("#ferrofall_canvas")).toHaveAttribute(
+  await expect(page.locator("#oxidefall_canvas")).toHaveAttribute(
     "data-screen",
     "viewport-too-small",
     { timeout: 30_000 },
@@ -78,7 +78,7 @@ test("uses the compact HUD in a narrow keyboard viewport", async ({ page }) => {
   await page.setViewportSize({ width: 500, height: 500 });
   await page.goto("./");
 
-  const canvas = page.locator("#ferrofall_canvas");
+  const canvas = page.locator("#oxidefall_canvas");
   await expect(canvas).toHaveAttribute("data-screen", "title", {
     timeout: 30_000,
   });
@@ -105,7 +105,7 @@ test.describe("mobile touch play", () => {
     page.on("pageerror", (error) => browserErrors.push(error.message));
 
     await page.goto("./");
-    const canvas = page.locator("#ferrofall_canvas");
+    const canvas = page.locator("#oxidefall_canvas");
     await expect(canvas).toHaveAttribute("data-screen", "title", {
       timeout: 30_000,
     });
@@ -115,10 +115,10 @@ test.describe("mobile touch play", () => {
     await expect(canvas).toHaveAttribute("data-screen", "playing");
     await expect(canvas).toHaveAttribute("data-touch-controls", "visible");
     await page.evaluate(() => {
-      const play = window.ferrofallAudioPlay;
-      window.__ferrofallRotationPlays = 0;
-      window.ferrofallAudioPlay = (name, ...args) => {
-        if (name === "rotate") window.__ferrofallRotationPlays += 1;
+      const play = window.oxidefallAudioPlay;
+      window.__oxidefallRotationPlays = 0;
+      window.oxidefallAudioPlay = (name, ...args) => {
+        if (name === "rotate") window.__oxidefallRotationPlays += 1;
         return play(name, ...args);
       };
     });
@@ -151,7 +151,7 @@ test.describe("mobile touch play", () => {
     await dispatchTouches(client, "touchStart", [clockwise]);
     await expect(canvas).toHaveAttribute("data-touch-active", "rotate-cw");
     await expect
-      .poll(() => page.evaluate(() => window.__ferrofallRotationPlays))
+      .poll(() => page.evaluate(() => window.__oxidefallRotationPlays))
       .toBe(1);
     await dispatchTouches(client, "touchMove", [{ x: 180, y: 400 }]);
     await expect(canvas).toHaveAttribute("data-touch-active", "rotate-cw");
@@ -160,18 +160,18 @@ test.describe("mobile touch play", () => {
     await dispatchTouches(client, "touchEnd", []);
     await expect(canvas).toHaveAttribute("data-touch-active", "");
     await expect
-      .poll(() => page.evaluate(() => window.__ferrofallRotationPlays))
+      .poll(() => page.evaluate(() => window.__oxidefallRotationPlays))
       .toBe(1);
 
     await dispatchTouches(client, "touchStart", [counterclockwise]);
     await expect(canvas).toHaveAttribute("data-touch-active", "rotate-ccw");
     await expect
-      .poll(() => page.evaluate(() => window.__ferrofallRotationPlays))
+      .poll(() => page.evaluate(() => window.__oxidefallRotationPlays))
       .toBe(2);
     await dispatchTouches(client, "touchEnd", []);
     await expect(canvas).toHaveAttribute("data-touch-active", "");
     await expect
-      .poll(() => page.evaluate(() => window.__ferrofallRotationPlays))
+      .poll(() => page.evaluate(() => window.__oxidefallRotationPlays))
       .toBe(2);
 
     await dispatchTouches(client, "touchStart", [
@@ -185,7 +185,7 @@ test.describe("mobile touch play", () => {
     await dispatchTouches(client, "touchEnd", []);
     await expect(canvas).toHaveAttribute("data-touch-active", "");
     await expect
-      .poll(() => page.evaluate(() => window.__ferrofallRotationPlays))
+      .poll(() => page.evaluate(() => window.__oxidefallRotationPlays))
       .toBe(3);
 
     await page.setViewportSize({ width: 640, height: 360 });
@@ -220,7 +220,7 @@ for (const [name, viewport, mobile] of [
     });
     const page = await context.newPage();
     await page.goto("./");
-    await expect(page.locator("#ferrofall_canvas")).toHaveAttribute(
+    await expect(page.locator("#oxidefall_canvas")).toHaveAttribute(
       "data-screen",
       "title",
       { timeout: 30_000 },

@@ -1,12 +1,12 @@
 use eframe::egui;
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) const CANVAS_ID: &str = "ferrofall_canvas";
+pub(crate) const CANVAS_ID: &str = "oxidefall_canvas";
 #[cfg(target_arch = "wasm32")]
 pub(crate) const LOADING_ID: &str = "loading";
 
 #[cfg(target_arch = "wasm32")]
-const BEST_SCORE_KEY: &str = "ferrofall.best-score.v1";
+const BEST_SCORE_KEY: &str = "oxidefall.best-score.v1";
 #[cfg(target_arch = "wasm32")]
 const MIN_PORTRAIT_WIDTH: f32 = 320.0;
 #[cfg(target_arch = "wasm32")]

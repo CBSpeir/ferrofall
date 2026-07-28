@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Ferrofall's deterministic, original sound-effect bank."""
+"""Generate Oxidefall's deterministic, original sound-effect bank."""
 
 from __future__ import annotations
 
@@ -253,7 +253,7 @@ def sound_recipes() -> dict[str, tuple[float, SampleFunction]]:
 
 
 def render_wav(name: str, duration: float, sample: SampleFunction) -> bytes:
-    random_source = random.Random(f"ferrofall-audio-v1:{name}")
+    random_source = random.Random(f"oxidefall-audio-v2:{name}")
     samples = [
         sample(index / SAMPLE_RATE, random_source.uniform(-1.0, 1.0))
         for index in range(round(duration * SAMPLE_RATE))

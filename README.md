@@ -1,6 +1,6 @@
-# Ferrofall
+# Oxidefall
 
-Ferrofall is a falling-block puzzle game written in Rust. Its primary release
+Oxidefall is a falling-block puzzle game written in Rust. Its primary release
 is a static WebAssembly website rendered with `eframe` and egui. The same
 deterministic engine and interface also build as a native desktop app.
 Original industrial-electronic sound effects provide optional gameplay and
@@ -69,7 +69,7 @@ mobile browser-toolbar resizing does not pause play.
 The web title screen offers an optional Fullscreen action when the browser
 supports it, but normal in-browser play is the baseline. Reloading, closing,
 or navigating away abandons the active run without a confirmation dialog.
-Ferrofall has no accounts, analytics, cookies, service worker, or remote
+Oxidefall has no accounts, analytics, cookies, service worker, or remote
 telemetry.
 
 The speaker control opens a master sound-effects volume slider. Volume and mute
@@ -78,7 +78,7 @@ player interaction and never blocks gameplay when output is unavailable.
 
 ## Gameplay
 
-Ferrofall uses a seven-bag randomizer, five-piece preview queue, hold, ghost
+Oxidefall uses a seven-bag randomizer, five-piece preview queue, hold, ghost
 piece, hard drop, soft drop, SRS rotation and kicks, modern scoring, combos,
 back-to-back bonuses, perfect clears, T-spins, and level-based gravity.
 
@@ -119,7 +119,7 @@ The source is available under either the MIT License or Apache License 2.0,
 at your option. See [LICENSE-MIT](LICENSE-MIT) and
 [LICENSE-APACHE](LICENSE-APACHE).
 
-The source licenses do not grant rights to the Ferrofall name or branding.
+The source licenses do not grant rights to the Oxidefall name or branding.
 Generated sound effects in `assets/audio` are separately dedicated to the
 public domain under CC0 1.0.
 

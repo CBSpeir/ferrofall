@@ -9,7 +9,7 @@ mod ui;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
-use app::FerrofallApp;
+use app::OxidefallApp;
 #[cfg(not(target_arch = "wasm32"))]
 use eframe::egui;
 
@@ -30,9 +30,9 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_native(
-        "Ferrofall",
+        "Oxidefall",
         options,
-        Box::new(|context| Ok(Box::new(FerrofallApp::new(context)))),
+        Box::new(|context| Ok(Box::new(OxidefallApp::new(context)))),
     )
 }
 
@@ -56,15 +56,15 @@ fn main() {
             .expect("browser document is unavailable");
         let canvas = document
             .get_element_by_id(platform::CANVAS_ID)
-            .expect("Ferrofall canvas is missing")
+            .expect("Oxidefall canvas is missing")
             .dyn_into::<web_sys::HtmlCanvasElement>()
-            .expect("Ferrofall canvas element has the wrong type");
+            .expect("Oxidefall canvas element has the wrong type");
 
         let result = eframe::WebRunner::new()
             .start(
                 canvas,
                 web_options,
-                Box::new(|context| Ok(Box::new(FerrofallApp::new(context)))),
+                Box::new(|context| Ok(Box::new(OxidefallApp::new(context)))),
             )
             .await;
 
@@ -76,10 +76,10 @@ fn main() {
                 }
                 Err(error) => {
                     loading.set_inner_html(
-                        "<h1>FERROFALL COULD NOT START</h1>\
+                        "<h1>OXIDEFALL COULD NOT START</h1>\
                          <p>WebGL may be unavailable. Try a current desktop browser.</p>",
                     );
-                    panic!("failed to start Ferrofall: {error:?}");
+                    panic!("failed to start Oxidefall: {error:?}");
                 }
             }
         }
@@ -89,7 +89,7 @@ fn main() {
 #[cfg(not(target_arch = "wasm32"))]
 fn initial_window_size() -> [f32; 2] {
     #[cfg(feature = "qa-screenshot")]
-    if std::env::var_os("FERROFALL_QA_MIN_SIZE").is_some() {
+    if std::env::var_os("OXIDEFALL_QA_MIN_SIZE").is_some() {
         return [720.0, 560.0];
     }
 
@@ -113,7 +113,18 @@ fn window_icon() -> egui::IconData {
         pixel.copy_from_slice(&[7, 16, 24, 255]);
     }
 
-    let cells = [(0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (0, 2), (0, 3)];
+    let cells = [
+        (0, 0),
+        (1, 0),
+        (2, 0),
+        (0, 1),
+        (2, 1),
+        (0, 2),
+        (2, 2),
+        (0, 3),
+        (1, 3),
+        (2, 3),
+    ];
     for (cell_x, cell_y) in cells {
         for y in 0..6 {
             for x in 0..6 {

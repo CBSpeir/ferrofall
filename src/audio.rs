@@ -625,17 +625,17 @@ mod output {
 
     #[wasm_bindgen]
     extern "C" {
-        #[wasm_bindgen(js_namespace = window, js_name = ferrofallAudioAvailable)]
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallAudioAvailable)]
         fn web_audio_available() -> bool;
-        #[wasm_bindgen(js_namespace = window, js_name = ferrofallAudioPrepare)]
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallAudioPrepare)]
         fn web_audio_prepare();
-        #[wasm_bindgen(js_namespace = window, js_name = ferrofallAudioActivate)]
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallAudioActivate)]
         fn web_audio_activate() -> bool;
-        #[wasm_bindgen(js_namespace = window, js_name = ferrofallAudioSetMasterVolume)]
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallAudioSetMasterVolume)]
         fn web_audio_set_master_volume(volume: f32);
-        #[wasm_bindgen(js_namespace = window, js_name = ferrofallAudioPlay)]
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallAudioPlay)]
         fn web_audio_play(name: &str, gain_db: f32, rate: f32, pan: f32, delay_seconds: f64);
-        #[wasm_bindgen(js_namespace = window, js_name = ferrofallAudioStopAll)]
+        #[wasm_bindgen(js_namespace = window, js_name = oxidefallAudioStopAll)]
         fn web_audio_stop_all();
     }
 

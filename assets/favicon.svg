@@ -5,8 +5,11 @@
     <rect x="12" y="4" width="7" height="7"/>
     <rect x="19" y="4" width="7" height="7"/>
     <rect x="5" y="11" width="7" height="7"/>
-    <rect x="12" y="11" width="7" height="7"/>
+    <rect x="19" y="11" width="7" height="7"/>
     <rect x="5" y="18" width="7" height="7"/>
+    <rect x="19" y="18" width="7" height="7"/>
     <rect x="5" y="25" width="7" height="3"/>
+    <rect x="12" y="25" width="7" height="3"/>
+    <rect x="19" y="25" width="7" height="3"/>
   </g>
 </svg>
