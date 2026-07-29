@@ -155,10 +155,10 @@ Open Font License 1.1. Their license texts and source details are in
 [build-badge]: https://img.shields.io/github/actions/workflow/status/CBSpeir/oxidefall/web.yml?branch=master&style=flat-square&logo=github&label=build
 [build]: https://github.com/CBSpeir/oxidefall/actions/workflows/web.yml
 [gameplay]: assets/gameplay.png
-[license-badge]: https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-0d1a22?style=flat-square
+[license-badge]: https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-526b77?style=flat-square
 [license]: #license
 [play-badge]: https://img.shields.io/badge/Play%20Online-b9680f?style=flat-square
 [play]: https://oxidefall.fyi
-[technology-badge]: https://img.shields.io/badge/Rust%20%2B%20WebAssembly-0d1a22?style=flat-square&logo=rust&logoColor=white
+[technology-badge]: https://img.shields.io/badge/Rust%20%2B%20WebAssembly-526b77?style=flat-square&logo=rust&logoColor=white
 [technology]: Cargo.toml
 [trunk]: https://trunk-rs.github.io/trunk/
