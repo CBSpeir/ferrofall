@@ -3,19 +3,81 @@ name: Web
 on:
   push:
     branches: [main, master]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
 concurrency:
-  group: pages-${{ github.ref }}
+  group: >-
+    ${{ github.event_name == 'push' &&
+        github.event.created == true &&
+        startsWith(github.ref, 'refs/tags/v') &&
+        'pages-release' || format('web-{0}', github.ref) }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  preflight:
+    name: Release preflight
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release history
+        if: >-
+          github.event_name == 'push' &&
+          github.event.created == true &&
+          startsWith(github.ref, 'refs/tags/v')
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Validate release tag
+        if: >-
+          github.event_name == 'push' &&
+          github.event.created == true &&
+          startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          stable_tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+
+          if [[ ! "$tag" =~ $stable_tag_pattern ]]; then
+            echo "release tags must use stable SemVer: vX.Y.Z" >&2
+            exit 1
+          fi
+
+          package_version="$(
+            sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml
+          )"
+          if [[ "v$package_version" != "$tag" ]]; then
+            echo "tag $tag does not match Cargo.toml version $package_version" >&2
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor HEAD origin/master; then
+            echo "release commit is not contained in origin/master" >&2
+            exit 1
+          fi
+
+          highest_tag=""
+          while IFS= read -r candidate; do
+            if [[ "$candidate" =~ $stable_tag_pattern ]]; then
+              highest_tag="$candidate"
+              break
+            fi
+          done < <(git tag --list "v*" --sort=-version:refname)
+
+          if [[ "$tag" != "$highest_tag" ]]; then
+            echo "tag $tag is not the highest stable version ($highest_tag)" >&2
+            exit 1
+          fi
+
+          echo "Validated release $tag from $(git rev-parse --short HEAD)." \
+            >> "$GITHUB_STEP_SUMMARY"
+
   quality:
     name: Native quality gates
+    needs: preflight
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
@@ -32,6 +94,7 @@ jobs:
 
   web:
     name: WebAssembly build and browser smoke test
+    needs: preflight
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -73,16 +136,26 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:web
-      - if: github.event_name != 'pull_request'
+      - if: >-
+          github.event_name == 'push' &&
+          github.event.created == true &&
+          startsWith(github.ref, 'refs/tags/v')
         uses: actions/configure-pages@v6
-      - if: github.event_name != 'pull_request'
+      - if: >-
+          github.event_name == 'push' &&
+          github.event.created == true &&
+          startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
   deploy:
     name: Deploy GitHub Pages
-    if: github.event_name != 'pull_request'
+    if: >-
+      success() &&
+      github.event_name == 'push' &&
+      github.event.created == true &&
+      startsWith(github.ref, 'refs/tags/v')
     needs: [quality, web]
     runs-on: ubuntu-latest
     permissions:

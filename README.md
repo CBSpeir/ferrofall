@@ -133,9 +133,33 @@ complete runtime download to 3.5 MiB. CI treats those limits as hard failures
 and archives optimized web-build timing data for trend review.
 
 The GitHub Actions workflow runs native quality gates, builds the release
-WebAssembly bundle, and exercises it in headless Chromium. Successful pushes
-to `main` or `master` deploy the static output to GitHub Pages. The repository
-must use GitHub Actions as its Pages source before the first deployment.
+WebAssembly bundle, and exercises it in headless Chromium for pull requests,
+pushes to `main` or `master`, manual runs, and release tags. Only a newly
+created release tag can deploy the static output to GitHub Pages. The
+repository must use GitHub Actions as its Pages source before the first
+deployment.
+
+## Publish a web release
+
+Update `[package].version` in the root `Cargo.toml`, refresh `Cargo.lock`, and
+merge the version bump to `master`. The internal `oxidefall-core` package does
+not need to share the app version. After the version-bump commit passes CI,
+create and push its matching release tag. For example:
+
+```sh
+git switch master
+git pull --ff-only
+git tag -a v0.2.0 -m "Oxidefall v0.2.0"
+git push origin v0.2.0
+```
+
+Release tags use stable SemVer in the exact form `vX.Y.Z`. The version must
+match the root package, be higher than every existing release tag, and point
+to a commit contained in `master`. CI rebuilds and retests the tagged commit
+before deployment. Lightweight and annotated tags are both accepted, but
+moving an existing tag, dispatching the workflow manually, or rerunning CI for
+a non-release event cannot publish. To retry a failed deployment, rerun the
+original tag-triggered workflow.
 
 ## License
 
