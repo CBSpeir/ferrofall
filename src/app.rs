@@ -608,6 +608,10 @@ impl OxidefallApp {
                 self.audio.play_ui(Cue::UiActivate);
                 self.return_to_title();
             }
+            UiAction::CopyBuildId => {
+                context.copy_text(crate::build_info::diagnostic_report());
+                self.set_ui_notice("BUILD ID COPIED".to_owned());
+            }
             UiAction::Quit => {
                 self.audio.play_ui(Cue::UiActivate);
                 context.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -1184,6 +1188,26 @@ mod tests {
 
         assert!(app.handle_screen_key(Key::Escape));
         assert_eq!(app.screen, Screen::Playing);
+    }
+
+    #[test]
+    fn copying_build_id_emits_diagnostic_report_and_notice() {
+        let context = egui::Context::default();
+        let mut app = OxidefallApp::initial_state();
+        let output = context.run_ui(egui::RawInput::default(), |ui| {
+            app.handle_ui_action(UiAction::CopyBuildId, ui.ctx());
+        });
+
+        assert_eq!(
+            output.platform_output.commands,
+            vec![egui::OutputCommand::CopyText(
+                crate::build_info::diagnostic_report()
+            )]
+        );
+        assert_eq!(
+            app.ui_notice.as_ref().map(|(message, _)| message.as_str()),
+            Some("BUILD ID COPIED")
+        );
     }
 
     #[test]

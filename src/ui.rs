@@ -42,6 +42,7 @@ pub(crate) enum UiAction {
     Resume,
     Restart,
     MainMenu,
+    CopyBuildId,
     ToggleSettings,
     CloseSettings,
     SetTheme(egui::ThemePreference),
@@ -569,6 +570,7 @@ fn show_title(ui: &mut egui::Ui, rect: Rect, touch_controls: bool) -> UiAction {
         label_font(if compact { 10.0 } else { 12.0 }),
         colors.muted,
     );
+    let copy_build_id = show_build_indicator(ui, rect, compact);
 
     if play {
         UiAction::Play
@@ -578,9 +580,67 @@ fn show_title(ui: &mut egui::Ui, rect: Rect, touch_controls: bool) -> UiAction {
         } else {
             UiAction::Quit
         }
+    } else if copy_build_id {
+        UiAction::CopyBuildId
     } else {
         UiAction::None
     }
+}
+
+fn show_build_indicator(ui: &mut egui::Ui, rect: Rect, compact: bool) -> bool {
+    let colors = Palette::for_theme(ui.ctx().theme());
+    let label = crate::build_info::display_label();
+    let font = label_font(if compact { 9.0 } else { 10.0 });
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.clone(), font.clone(), colors.muted);
+    let label_position = pos2(rect.left() + 16.0, rect.bottom() - 14.0);
+    let label_rect = Rect::from_min_size(
+        pos2(label_position.x, label_position.y - galley.size().y),
+        galley.size(),
+    );
+    let target_rect = Rect::from_min_max(
+        pos2(rect.left() + 8.0, rect.bottom() - 48.0),
+        pos2(
+            (label_rect.right() + 8.0).max(rect.left() + 56.0),
+            rect.bottom(),
+        ),
+    );
+    let response = ui
+        .interact(
+            target_rect,
+            ui.make_persistent_id("build_id_button"),
+            egui::Sense::click(),
+        )
+        .on_hover_text("Copy build ID");
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            true,
+            format!("Copy build ID, {label}"),
+        )
+    });
+
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            label_rect.expand(4.0),
+            2.0,
+            Stroke::new(1.5, colors.accent),
+            StrokeKind::Outside,
+        );
+    }
+    ui.painter().text(
+        label_position,
+        Align2::LEFT_BOTTOM,
+        label,
+        font,
+        if response.hovered() || response.has_focus() {
+            colors.text
+        } else {
+            colors.muted
+        },
+    );
+    response.clicked()
 }
 
 fn show_game(

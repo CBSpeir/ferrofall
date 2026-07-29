@@ -336,6 +336,15 @@ canvas screen so assistive technology and browser smoke tests can identify the
 current high-level state. Touch controls publish labeled egui button semantics.
 The real-time canvas game does not claim complete screen-reader playability.
 
+The title screen shows a muted build indicator in its bottom-left corner on
+both web and native targets. Its visible form is the Cargo package version and,
+when available, the short Git commit, with `+dirty` for staged or modified
+tracked files. Clicking, tapping, or keyboard-activating the accessible control
+copies a diagnostic string containing the full commit, target, and build
+profile, then shows the existing transient notice. Builds without Git metadata
+fall back to the package version. Build timestamps and untracked files do not
+affect the identifier.
+
 ## Audio system
 
 Audio is a presentation effect and never changes deterministic simulation

@@ -2,6 +2,7 @@
 
 mod app;
 mod audio;
+mod build_info;
 mod platform;
 mod settings;
 mod theme;

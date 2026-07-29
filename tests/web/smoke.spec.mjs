@@ -128,6 +128,18 @@ test("loads the title screen and starts a game", async ({ page }) => {
   expect(browserErrors).toEqual([]);
 });
 
+test("copies the title-screen build identifier", async ({ page }) => {
+  await page.goto("./");
+  const canvas = page.locator("#oxidefall_canvas");
+  await expect(canvas).toHaveAttribute("data-screen", "title", {
+    timeout: 30_000,
+  });
+
+  await page.mouse.click(70, 700);
+  await expect(page.locator("#app_status")).toContainText("BUILD ID COPIED");
+  await expect(canvas).toHaveAttribute("data-screen", "title");
+});
+
 test("isolates missing music from sound effects and gameplay", async ({ page }) => {
   await page.route("**/audio/music_*.ogg", (route) => route.abort());
   await page.goto("./");
