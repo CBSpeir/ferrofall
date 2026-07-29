@@ -22,12 +22,12 @@ BEAT_SAMPLES = round(SAMPLE_RATE * 60 / BPM)
 BAR_SAMPLES = BEAT_SAMPLES * 4
 BARS = 64
 TOTAL_SAMPLES = BAR_SAMPLES * BARS
-MUSIC_BUDGET_BYTES = 4 * 1024 * 1024
+MUSIC_BUDGET_BYTES = 2 * 1024 * 1024
 TAU = math.tau
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "assets" / "audio"
 MASTER_DIR = ROOT / "target" / "music-masters"
-MANIFEST_PATH = OUTPUT_DIR / "music_manifest.json"
+MANIFEST_PATH = ROOT / "assets" / "audio-metadata" / "music_manifest.json"
 STEMS = ("music_base", "music_drive", "music_pressure")
 
 

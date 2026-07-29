@@ -6,20 +6,23 @@ description = "A deterministic falling-block puzzle game for web and desktop"
 license = "MIT OR Apache-2.0"
 publish = false
 
+[workspace]
+members = ["crates/oxidefall-core"]
+exclude = ["tools/music_encoder"]
+resolver = "3"
+
 [features]
 audio-lab = []
-qa-screenshot = ["eframe/__screenshot", "eframe/glow"]
+qa-screenshot = ["eframe/__screenshot"]
 
 [dependencies]
-rand = "0.10.2"
-rand_chacha = "0.10.0"
+getrandom = "0.4.3"
+oxidefall-core = { path = "crates/oxidefall-core" }
 web-time = "1.1.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 eframe = { version = "0.35.0", default-features = false, features = [
     "accesskit",
-    "default_fonts",
-    "persistence",
     "wayland",
     "wgpu",
     "x11",
@@ -27,16 +30,12 @@ eframe = { version = "0.35.0", default-features = false, features = [
 kira = { version = "0.12.2", default-features = false, features = [
     "cpal",
     "ogg",
-    "pcm",
     "vorbis",
-    "wav",
 ] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 eframe = { version = "0.35.0", default-features = false, features = [
-    "default_fonts",
     "glow",
-    "persistence",
     "web_screen_reader",
 ] }
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
@@ -57,5 +56,18 @@ lto = "thin"
 opt-level = 2
 strip = true
 
+[profile.web-release]
+inherits = "release"
+codegen-units = 1
+lto = "fat"
+opt-level = "z"
+panic = "abort"
+strip = true
+
+[profile.dev]
+debug = 0
+incremental = true
+panic = "abort"
+
 [profile.dev.package."*"]
-opt-level = 2
+opt-level = 1

@@ -5,9 +5,12 @@ use std::time::Duration;
 use eframe::egui::{self, Event, Key, Pos2, Rect, TouchId, TouchPhase};
 use web_time::Instant;
 
-use crate::audio::{AudioSystem, Cue, DEFAULT_EFFECTS_VOLUME, DEFAULT_MUSIC_VOLUME};
+use crate::audio::{AudioSystem, Cue};
+#[cfg(test)]
+use crate::audio::{DEFAULT_EFFECTS_VOLUME, DEFAULT_MUSIC_VOLUME};
 use crate::game::{Action, Command, Game, GameConfig};
 use crate::platform;
+use crate::settings::Settings;
 use crate::theme::{self, Palette};
 use crate::ui::{
     AudioUiState, DISPLAY_FONT_FAMILY, Screen, TouchControlAction, UiAction, UiOutput, UiState,
@@ -17,9 +20,6 @@ use crate::ui::{
 const SIMULATION_STEP: Duration = Duration::from_nanos(1_000_000_000 / 60);
 const MAX_CATCH_UP: Duration = Duration::from_millis(250);
 const UI_NOTICE_DURATION: Duration = Duration::from_millis(1_200);
-const AUDIO_EFFECTS_VOLUME_KEY: &str = "oxidefall.audio-volume.v1";
-const AUDIO_MUSIC_VOLUME_KEY: &str = "oxidefall.music-volume.v1";
-const AUDIO_MUTED_KEY: &str = "oxidefall.audio-muted.v1";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ViewportOrientation {
@@ -89,31 +89,17 @@ pub(crate) struct OxidefallApp {
 
 impl OxidefallApp {
     pub(crate) fn new(context: &eframe::CreationContext<'_>) -> Self {
+        Self::new_with_settings(context, Settings::load())
+    }
+
+    fn new_with_settings(context: &eframe::CreationContext<'_>, settings: Settings) -> Self {
         configure_egui(&context.egui_ctx);
-        let effects_volume = context
-            .storage
-            .and_then(|storage| storage.get_string(AUDIO_EFFECTS_VOLUME_KEY))
-            .and_then(|volume| volume.parse::<f32>().ok())
-            .filter(|volume| volume.is_finite())
-            .unwrap_or(DEFAULT_EFFECTS_VOLUME)
-            .clamp(0.0, 1.0);
-        let music_volume = context
-            .storage
-            .and_then(|storage| storage.get_string(AUDIO_MUSIC_VOLUME_KEY))
-            .and_then(|volume| volume.parse::<f32>().ok())
-            .filter(|volume| volume.is_finite())
-            .unwrap_or(DEFAULT_MUSIC_VOLUME)
-            .clamp(0.0, 1.0);
-        let muted = context
-            .storage
-            .and_then(|storage| storage.get_string(AUDIO_MUTED_KEY))
-            .is_some_and(|muted| muted == "true");
-        let theme_preference = context
-            .storage
-            .and_then(|storage| storage.get_string(theme::PREFERENCE_KEY))
-            .as_deref()
-            .and_then(theme::parse_preference)
-            .unwrap_or(egui::ThemePreference::System);
+        let Settings {
+            effects_volume,
+            music_volume,
+            muted,
+            theme_preference,
+        } = settings;
         context.egui_ctx.set_theme(theme_preference);
         sync_window_theme(&context.egui_ctx, theme_preference);
         let mut app = Self::initial_state_with_audio(effects_volume, music_volume, muted);
@@ -208,7 +194,7 @@ impl OxidefallApp {
         self.audio.play_ui(Cue::GameStart);
         self.audio.start_music();
         self.settings_open = false;
-        let seed = rand::random::<u64>();
+        let seed = getrandom::u64().expect("a system random seed is unavailable");
         self.game = Some(Game::new(GameConfig::default(), seed));
         self.screen = Screen::Playing;
         self.last_frame = Instant::now();
@@ -658,6 +644,7 @@ impl OxidefallApp {
             UiAction::SetEffectsVolume(volume) => {
                 self.audio.activate();
                 self.audio.set_effects_volume(volume);
+                self.persist_settings();
                 self.set_ui_notice(format!(
                     "EFFECTS {}%",
                     (self.audio.effects_volume() * 100.0).round() as u32
@@ -666,6 +653,7 @@ impl OxidefallApp {
             UiAction::SetMusicVolume(volume) => {
                 self.audio.activate();
                 self.audio.set_music_volume(volume);
+                self.persist_settings();
                 self.set_ui_notice(format!(
                     "MUSIC {}%",
                     (self.audio.music_volume() * 100.0).round() as u32
@@ -678,6 +666,7 @@ impl OxidefallApp {
     fn toggle_mute(&mut self) {
         self.audio.activate();
         self.audio.toggle_muted();
+        self.persist_settings();
         self.set_ui_notice(if self.audio.is_muted() {
             "SOUND MUTED".to_owned()
         } else {
@@ -706,6 +695,17 @@ impl OxidefallApp {
         sync_window_theme(context, preference);
         self.resolved_theme = context.theme();
         platform::sync_theme(preference, self.resolved_theme);
+        self.persist_settings();
+    }
+
+    fn persist_settings(&self) {
+        Settings {
+            effects_volume: self.audio.effects_volume(),
+            music_volume: self.audio.music_volume(),
+            muted: self.audio.is_muted(),
+            theme_preference: self.theme_preference,
+        }
+        .save();
     }
 
     fn sync_resolved_theme(&mut self, context: &egui::Context) {
@@ -733,8 +733,14 @@ impl OxidefallApp {
             }
             AudioLabAction::Stop => self.audio.stop_all(),
             AudioLabAction::ToggleMute => self.toggle_mute(),
-            AudioLabAction::SetEffectsVolume(volume) => self.audio.set_effects_volume(volume),
-            AudioLabAction::SetMusicVolume(volume) => self.audio.set_music_volume(volume),
+            AudioLabAction::SetEffectsVolume(volume) => {
+                self.audio.set_effects_volume(volume);
+                self.persist_settings();
+            }
+            AudioLabAction::SetMusicVolume(volume) => {
+                self.audio.set_music_volume(volume);
+                self.persist_settings();
+            }
             AudioLabAction::SetRate(rate) => self.audio_lab_rate = rate,
             AudioLabAction::SetPan(pan) => self.audio_lab_pan = pan,
             AudioLabAction::PreviewMusic(tier) => self.audio.preview_music(tier),
@@ -931,30 +937,6 @@ impl eframe::App for OxidefallApp {
             .background
             .to_normalized_gamma_f32()
     }
-
-    fn persist_egui_memory(&self) -> bool {
-        false
-    }
-
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        storage.set_string(
-            AUDIO_EFFECTS_VOLUME_KEY,
-            self.audio.effects_volume().to_string(),
-        );
-        storage.set_string(
-            AUDIO_MUSIC_VOLUME_KEY,
-            self.audio.music_volume().to_string(),
-        );
-        storage.set_string(AUDIO_MUTED_KEY, self.audio.is_muted().to_string());
-        storage.set_string(
-            theme::PREFERENCE_KEY,
-            theme::preference_value(self.theme_preference).to_owned(),
-        );
-    }
-
-    fn auto_save_interval(&self) -> Duration {
-        Duration::from_secs(1)
-    }
 }
 
 fn key_to_action(key: Key) -> Option<Action> {
@@ -1002,19 +984,19 @@ fn sync_window_theme(context: &egui::Context, preference: egui::ThemePreference)
 pub(crate) fn configure_egui(context: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
-        "saira-condensed-extra-bold".to_owned(),
+        "oxidefall-display".to_owned(),
         Arc::new(egui::FontData::from_static(include_bytes!(
-            "../assets/fonts/SairaCondensed-ExtraBold.ttf"
+            "../assets/fonts/OxidefallDisplay.ttf"
         ))),
     );
     fonts.font_data.insert(
-        "ibm-plex-mono-medium".to_owned(),
+        "oxidefall-mono".to_owned(),
         Arc::new(egui::FontData::from_static(include_bytes!(
-            "../assets/fonts/IBMPlexMono-Medium.ttf"
+            "../assets/fonts/OxidefallMono.ttf"
         ))),
     );
 
-    let mut display_fonts = vec!["saira-condensed-extra-bold".to_owned()];
+    let mut display_fonts = vec!["oxidefall-display".to_owned()];
     if let Some(fallbacks) = fonts.families.get(&egui::FontFamily::Proportional) {
         display_fonts.extend(fallbacks.iter().cloned());
     }
@@ -1026,7 +1008,7 @@ pub(crate) fn configure_egui(context: &egui::Context) {
         .families
         .entry(egui::FontFamily::Monospace)
         .or_default()
-        .insert(0, "ibm-plex-mono-medium".to_owned());
+        .insert(0, "oxidefall-mono".to_owned());
     context.set_fonts(fonts);
 
     for theme in [egui::Theme::Dark, egui::Theme::Light] {
@@ -1082,27 +1064,6 @@ pub(crate) fn configure_egui(context: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eframe::Storage as _;
-    use std::collections::HashMap;
-
-    #[derive(Default)]
-    struct MemoryStorage(HashMap<String, String>);
-
-    impl eframe::Storage for MemoryStorage {
-        fn get_string(&self, key: &str) -> Option<String> {
-            self.0.get(key).cloned()
-        }
-
-        fn set_string(&mut self, key: &str, value: String) {
-            self.0.insert(key.to_owned(), value);
-        }
-
-        fn remove_string(&mut self, key: &str) {
-            self.0.remove(key);
-        }
-
-        fn flush(&mut self) {}
-    }
 
     #[test]
     fn title_play_movement_focus_pause_and_resume_form_a_complete_path() {
@@ -1179,50 +1140,29 @@ mod tests {
     }
 
     #[test]
-    fn user_preferences_restore_and_save_through_eframe_storage() {
-        let mut stored = MemoryStorage::default();
-        stored.set_string(AUDIO_EFFECTS_VOLUME_KEY, "0.42".to_owned());
-        stored.set_string(AUDIO_MUSIC_VOLUME_KEY, "0.27".to_owned());
-        stored.set_string(AUDIO_MUTED_KEY, "true".to_owned());
-        stored.set_string(theme::PREFERENCE_KEY, "light".to_owned());
-        let mut creation = eframe::CreationContext::_new_kittest(egui::Context::default());
-        creation.storage = Some(&stored);
-        let mut app = OxidefallApp::new(&creation);
+    fn user_preferences_restore_from_app_settings() {
+        let creation = eframe::CreationContext::_new_kittest(egui::Context::default());
+        let app = OxidefallApp::new_with_settings(
+            &creation,
+            Settings {
+                effects_volume: 0.42,
+                music_volume: 0.27,
+                muted: true,
+                theme_preference: egui::ThemePreference::Light,
+            },
+        );
 
         assert!((app.audio.effects_volume() - 0.42).abs() < f32::EPSILON);
         assert!((app.audio.music_volume() - 0.27).abs() < f32::EPSILON);
         assert!(app.audio.is_muted());
         assert_eq!(app.theme_preference, egui::ThemePreference::Light);
         assert_eq!(creation.egui_ctx.theme(), egui::Theme::Light);
-
-        app.audio.set_effects_volume(0.81);
-        app.audio.set_music_volume(0.19);
-        app.audio.set_muted(false);
-        app.set_theme_preference(&creation.egui_ctx, egui::ThemePreference::Dark);
-        let mut saved = MemoryStorage::default();
-        eframe::App::save(&mut app, &mut saved);
-        assert_eq!(
-            saved.get_string(AUDIO_EFFECTS_VOLUME_KEY).as_deref(),
-            Some("0.81")
-        );
-        assert_eq!(
-            saved.get_string(AUDIO_MUSIC_VOLUME_KEY).as_deref(),
-            Some("0.19")
-        );
-        assert_eq!(saved.get_string(AUDIO_MUTED_KEY).as_deref(), Some("false"));
-        assert_eq!(
-            saved.get_string(theme::PREFERENCE_KEY).as_deref(),
-            Some("dark")
-        );
     }
 
     #[test]
     fn malformed_theme_preference_falls_back_to_system_dark() {
-        let mut stored = MemoryStorage::default();
-        stored.set_string(theme::PREFERENCE_KEY, "sepia".to_owned());
-        let mut creation = eframe::CreationContext::_new_kittest(egui::Context::default());
-        creation.storage = Some(&stored);
-        let app = OxidefallApp::new(&creation);
+        let creation = eframe::CreationContext::_new_kittest(egui::Context::default());
+        let app = OxidefallApp::new_with_settings(&creation, Settings::default());
 
         assert_eq!(app.theme_preference, egui::ThemePreference::System);
         assert_eq!(app.resolved_theme, egui::Theme::Dark);

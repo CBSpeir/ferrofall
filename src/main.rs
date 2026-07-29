@@ -2,10 +2,14 @@
 
 mod app;
 mod audio;
-mod game;
 mod platform;
+mod settings;
 mod theme;
 mod ui;
+
+mod game {
+    pub(crate) use oxidefall_core::*;
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
@@ -99,10 +103,6 @@ fn initial_window_size() -> [f32; 2] {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn native_renderer() -> eframe::Renderer {
-    #[cfg(feature = "qa-screenshot")]
-    return eframe::Renderer::Glow;
-
-    #[cfg(not(feature = "qa-screenshot"))]
     eframe::Renderer::Wgpu
 }
 

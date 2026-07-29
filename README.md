@@ -15,20 +15,21 @@ optional audio on both targets.
 
 ## Run the website locally
 
-Install the current stable Rust toolchain, the WebAssembly target, and
-[Trunk][trunk]:
+Install rustup and [Trunk 0.21.14][trunk]. The repository pins Rust 1.97.1 and
+installs the WebAssembly target through `rust-toolchain.toml`:
 
 ```sh
-rustup target add wasm32-unknown-unknown
-cargo install --locked trunk
-trunk serve
+rustup show
+cargo install --locked trunk --version 0.21.14
+python3 tools/trunk.py serve
 ```
 
 Then open <http://127.0.0.1:8080>. The production bundle is generated in
 `dist/` with:
 
 ```sh
-trunk build --release
+python3 tools/trunk.py build --release --cargo-profile web-release
+python3 tools/check_web_bundle.py dist
 ```
 
 The web release supports current desktop Chrome, Edge, Firefox, and Safari,
@@ -104,25 +105,32 @@ See [DESIGN.md](DESIGN.md) for the complete rules and architecture.
 ## Quality checks
 
 ```sh
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace
+cargo test -p oxidefall-core
 cargo check --target wasm32-unknown-unknown
-trunk build --release
+python3 tools/trunk.py build --release --cargo-profile web-release
 python3 tools/check_web_bundle.py dist
 npm ci
 npx playwright install chromium
 npm run test:web
 python3 tools/generate_audio.py --check
 python3 tools/generate_music.py --check
+python3 tools/generate_fonts.py --check
 ```
 
 Run `cargo run --features audio-lab` to open the development-only soundboard.
 It previews individual cues, pitch and pan variants, compound scoring events,
-and every adaptive music tier. Regenerate the WAV effects with
-`python3 tools/generate_audio.py`. Regenerate the Ogg Vorbis music stems with
-`python3 tools/generate_music.py`; FFmpeg is preferred, with the repository's
-source-built Rust encoder available as a fallback.
+and every adaptive music tier. Regenerate the Ogg Vorbis effects with
+`python3 tools/generate_audio.py` and the synchronized music stems with
+`python3 tools/generate_music.py`. FFmpeg is preferred, with the repository's
+source-built Rust encoder available as a fallback. Regenerate the renamed UI
+font subsets with `python3 tools/generate_fonts.py` and HarfBuzz `hb-subset`.
+
+The release gate limits the compressed critical path to 1.5 MiB and the
+complete runtime download to 3.5 MiB. CI treats those limits as hard failures
+and archives optimized web-build timing data for trend review.
 
 The GitHub Actions workflow runs native quality gates, builds the release
 WebAssembly bundle, and exercises it in headless Chromium. Successful pushes
@@ -136,8 +144,9 @@ at your option. See [LICENSE-MIT](LICENSE-MIT) and
 [LICENSE-APACHE](LICENSE-APACHE).
 
 The source licenses do not grant rights to the Oxidefall name or branding.
-Generated sound effects, music stems, and composition data in `assets/audio`
-are separately dedicated to the public domain under CC0 1.0.
+Generated sound effects and music stems in `assets/audio`, plus their
+composition data in `assets/audio-metadata`, are separately dedicated to the
+public domain under CC0 1.0.
 
 Saira Condensed ExtraBold and IBM Plex Mono Medium are bundled under the SIL
 Open Font License 1.1. Their license texts and source details are in

@@ -38,10 +38,14 @@ async function setStoredTheme(page, preference) {
 
 test("loads the title screen and starts a game", async ({ page }) => {
   const browserErrors = [];
+  const audioRequests = [];
   page.on("console", (message) => {
     if (message.type() === "error") browserErrors.push(message.text());
   });
   page.on("pageerror", (error) => browserErrors.push(error.message));
+  page.on("request", (request) => {
+    if (request.url().includes("/audio/")) audioRequests.push(request.url());
+  });
 
   await page.goto("./");
   await expect(page).toHaveTitle("Oxidefall");
@@ -50,6 +54,7 @@ test("loads the title screen and starts a game", async ({ page }) => {
   await expect(canvas).toHaveAttribute("data-screen", "title", {
     timeout: 30_000,
   });
+  expect(audioRequests).toEqual([]);
   await canvas.focus();
   await page.keyboard.press("Enter");
 
@@ -60,11 +65,35 @@ test("loads the title screen and starts a game", async ({ page }) => {
     return (
       state?.available &&
       state.ready &&
+      state.startupCuePlayed &&
       state.musicReady &&
       state.musicPlaying &&
       state.contextState === "running"
     );
   });
+  const initialAudio = await page.evaluate(() => window.oxidefallAudioDebugState());
+  expect(initialAudio.effectsRequested).toBe(true);
+  expect(initialAudio.requestedMusicStems).toEqual(["music_base"]);
+  expect(initialAudio.loadedMusicStems).toEqual(["music_base"]);
+
+  await page.evaluate(() => window.oxidefallMusicSetTier(2));
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.oxidefallAudioDebugState().loadedMusicStems),
+    )
+    .toContain("music_drive");
+  expect(
+    await page.evaluate(() =>
+      window.oxidefallAudioDebugState().requestedMusicStems.includes("music_pressure"),
+    ),
+  ).toBe(false);
+
+  await page.evaluate(() => window.oxidefallMusicSetTier(3));
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.oxidefallAudioDebugState().loadedMusicStems),
+    )
+    .toContain("music_pressure");
 
   const beforeMute = await page.evaluate(
     () => window.oxidefallAudioDebugState().musicPosition,
@@ -74,10 +103,11 @@ test("loads the title screen and starts a game", async ({ page }) => {
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("oxidefall.audio-muted.v1")))
     .toBe("true");
-  await page.waitForTimeout(250);
+  await expect
+    .poll(() => page.evaluate(() => window.oxidefallAudioDebugState().musicPosition))
+    .toBeGreaterThan(beforeMute + 0.15);
   const whileMuted = await page.evaluate(() => window.oxidefallAudioDebugState());
   expect(whileMuted.muted).toBe(true);
-  expect(whileMuted.musicPosition).toBeGreaterThan(beforeMute + 0.15);
 
   await page.keyboard.press("m");
   await page.keyboard.press("Escape");

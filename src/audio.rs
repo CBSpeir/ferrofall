@@ -892,69 +892,69 @@ mod output {
         let assets: [(Cue, &'static [u8]); 22] = [
             (
                 Cue::UiActivate,
-                include_bytes!("../assets/audio/ui_activate.wav"),
+                include_bytes!("../assets/audio/ui_activate.ogg"),
             ),
             (
                 Cue::GameStart,
-                include_bytes!("../assets/audio/game_start.wav"),
+                include_bytes!("../assets/audio/game_start.ogg"),
             ),
-            (Cue::Pause, include_bytes!("../assets/audio/pause.wav")),
-            (Cue::Resume, include_bytes!("../assets/audio/resume.wav")),
-            (Cue::MoveA, include_bytes!("../assets/audio/move_a.wav")),
-            (Cue::MoveB, include_bytes!("../assets/audio/move_b.wav")),
-            (Cue::Rotate, include_bytes!("../assets/audio/rotate.wav")),
-            (Cue::Hold, include_bytes!("../assets/audio/hold.wav")),
-            (Cue::Contact, include_bytes!("../assets/audio/contact.wav")),
+            (Cue::Pause, include_bytes!("../assets/audio/pause.ogg")),
+            (Cue::Resume, include_bytes!("../assets/audio/resume.ogg")),
+            (Cue::MoveA, include_bytes!("../assets/audio/move_a.ogg")),
+            (Cue::MoveB, include_bytes!("../assets/audio/move_b.ogg")),
+            (Cue::Rotate, include_bytes!("../assets/audio/rotate.ogg")),
+            (Cue::Hold, include_bytes!("../assets/audio/hold.ogg")),
+            (Cue::Contact, include_bytes!("../assets/audio/contact.ogg")),
             (
                 Cue::HardDrop,
-                include_bytes!("../assets/audio/hard_drop.wav"),
+                include_bytes!("../assets/audio/hard_drop.ogg"),
             ),
-            (Cue::Lock, include_bytes!("../assets/audio/lock.wav")),
+            (Cue::Lock, include_bytes!("../assets/audio/lock.ogg")),
             (
                 Cue::ClearSingle,
-                include_bytes!("../assets/audio/clear_single.wav"),
+                include_bytes!("../assets/audio/clear_single.ogg"),
             ),
             (
                 Cue::ClearDouble,
-                include_bytes!("../assets/audio/clear_double.wav"),
+                include_bytes!("../assets/audio/clear_double.ogg"),
             ),
             (
                 Cue::ClearTriple,
-                include_bytes!("../assets/audio/clear_triple.wav"),
+                include_bytes!("../assets/audio/clear_triple.ogg"),
             ),
             (
                 Cue::ClearFour,
-                include_bytes!("../assets/audio/clear_four.wav"),
+                include_bytes!("../assets/audio/clear_four.ogg"),
             ),
             (
                 Cue::AccentTSpin,
-                include_bytes!("../assets/audio/accent_tspin.wav"),
+                include_bytes!("../assets/audio/accent_tspin.ogg"),
             ),
             (
                 Cue::AccentCombo,
-                include_bytes!("../assets/audio/accent_combo.wav"),
+                include_bytes!("../assets/audio/accent_combo.ogg"),
             ),
             (
                 Cue::AccentBackToBack,
-                include_bytes!("../assets/audio/accent_back_to_back.wav"),
+                include_bytes!("../assets/audio/accent_back_to_back.ogg"),
             ),
             (
                 Cue::AccentPerfect,
-                include_bytes!("../assets/audio/accent_perfect.wav"),
+                include_bytes!("../assets/audio/accent_perfect.ogg"),
             ),
-            (Cue::LevelUp, include_bytes!("../assets/audio/level_up.wav")),
+            (Cue::LevelUp, include_bytes!("../assets/audio/level_up.ogg")),
             (
                 Cue::GameOver,
-                include_bytes!("../assets/audio/game_over.wav"),
+                include_bytes!("../assets/audio/game_over.ogg"),
             ),
-            (Cue::NewBest, include_bytes!("../assets/audio/new_best.wav")),
+            (Cue::NewBest, include_bytes!("../assets/audio/new_best.ogg")),
         ];
         assets
             .into_iter()
             .map(|(cue, bytes)| {
                 StaticSoundData::from_cursor(Cursor::new(bytes))
                     .map(|sound| (cue, sound))
-                    .map_err(|error| format!("Could not decode {}.wav: {error}", cue.file_stem()))
+                    .map_err(|error| format!("Could not decode {}.ogg: {error}", cue.file_stem()))
             })
             .collect()
     }

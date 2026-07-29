@@ -4,10 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
+import json
 import math
 import random
+import shutil
 import struct
+import subprocess
+import sys
 import wave
 from collections.abc import Callable
 from pathlib import Path
@@ -17,6 +22,9 @@ SAMPLE_RATE = 32_000
 TAU = math.tau
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "assets" / "audio"
+MASTER_DIR = ROOT / "target" / "audio-masters"
+MANIFEST_PATH = ROOT / "assets" / "audio-metadata" / "effects_manifest.json"
+EFFECTS_BUDGET_BYTES = 256 * 1024
 SampleFunction = Callable[[float, float], float]
 
 
@@ -274,37 +282,159 @@ def render_wav(name: str, duration: float, sample: SampleFunction) -> bytes:
     return output.getvalue()
 
 
+def encoder() -> tuple[list[str], str]:
+    if ffmpeg := shutil.which("ffmpeg"):
+        return (
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-map_metadata",
+                "-1",
+                "-ar",
+                str(SAMPLE_RATE),
+                "-ac",
+                "1",
+                "-c:a",
+                "libvorbis",
+                "-q:a",
+                "3",
+            ],
+            "ffmpeg-libvorbis-q3",
+        )
+    cargo = shutil.which("cargo")
+    manifest = ROOT / "tools" / "music_encoder" / "Cargo.toml"
+    if cargo and manifest.is_file():
+        target = ROOT / "target" / "music-encoder"
+        subprocess.run(
+            [
+                cargo,
+                "build",
+                "--quiet",
+                "--release",
+                "--manifest-path",
+                str(manifest),
+                "--target-dir",
+                str(target),
+            ],
+            check=True,
+        )
+        executable = target / "release" / "oxidefall-music-encoder"
+        if sys.platform == "win32":
+            executable = executable.with_suffix(".exe")
+        return ([str(executable)], "vorbis-rs-quality-vbr-0.35")
+    raise RuntimeError("FFmpeg or Cargo is required to encode sound effects")
+
+
+def encode(master: Path, output: Path, command: list[str]) -> None:
+    output.unlink(missing_ok=True)
+    if Path(command[0]).name.startswith("ffmpeg"):
+        subprocess.run(
+            [*command[:5], "-i", str(master), *command[5:], str(output)],
+            check=True,
+        )
+    else:
+        subprocess.run([*command, str(master), str(output)], check=True)
+
+
+def expected_manifest() -> dict[str, object]:
+    recipes = sound_recipes()
+    effects = {}
+    for name, (duration, sample) in sorted(recipes.items()):
+        master = render_wav(name, duration, sample)
+        effects[name] = {
+            "master_sha256": hashlib.sha256(master).hexdigest(),
+            "asset": f"{name}.ogg",
+        }
+    return {
+        "format_version": 1,
+        "sample_rate": SAMPLE_RATE,
+        "budget_bytes": EFFECTS_BUDGET_BYTES,
+        "effects": effects,
+    }
+
+
+def generate() -> None:
+    recipes = sound_recipes()
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    MASTER_DIR.mkdir(parents=True, exist_ok=True)
+    command, encoder_name = encoder()
+    manifest = expected_manifest()
+    total_bytes = 0
+    for name, (duration, sample) in sorted(recipes.items()):
+        master_path = MASTER_DIR / f"{name}.wav"
+        asset_path = OUTPUT_DIR / f"{name}.ogg"
+        master_path.write_bytes(render_wav(name, duration, sample))
+        encode(master_path, asset_path, command)
+        asset = asset_path.read_bytes()
+        total_bytes += len(asset)
+        manifest["effects"][name].update(
+            {
+                "asset_bytes": len(asset),
+                "asset_sha256": hashlib.sha256(asset).hexdigest(),
+            }
+        )
+    if total_bytes > EFFECTS_BUDGET_BYTES:
+        raise RuntimeError(
+            f"Sound effects use {total_bytes} bytes; budget is {EFFECTS_BUDGET_BYTES}."
+        )
+    manifest["encoder"] = encoder_name
+    manifest["total_asset_bytes"] = total_bytes
+    MANIFEST_PATH.write_text(json.dumps(manifest, indent=2) + "\n")
+    print(f"Generated {len(recipes)} effects ({total_bytes / 1024:.1f} KiB).")
+
+
+def check() -> int:
+    if not MANIFEST_PATH.is_file():
+        print("Effects manifest is missing.", file=sys.stderr)
+        return 1
+    recorded = json.loads(MANIFEST_PATH.read_text())
+    expected = expected_manifest()
+    mismatches: list[str] = []
+    for key in ("format_version", "sample_rate", "budget_bytes"):
+        if recorded.get(key) != expected[key]:
+            mismatches.append(key)
+    total_bytes = 0
+    recipes = sound_recipes()
+    for name, (duration, sample) in sorted(recipes.items()):
+        expected_effect = expected["effects"][name]
+        recorded_effect = recorded.get("effects", {}).get(name, {})
+        if recorded_effect.get("master_sha256") != expected_effect["master_sha256"]:
+            mismatches.append(f"{name}:master")
+        path = OUTPUT_DIR / f"{name}.ogg"
+        if not path.is_file() or not path.read_bytes().startswith(b"OggS"):
+            mismatches.append(f"{name}:asset")
+            continue
+        asset = path.read_bytes()
+        total_bytes += len(asset)
+        if recorded_effect.get("asset_sha256") != hashlib.sha256(asset).hexdigest():
+            mismatches.append(f"{name}:asset-sha256")
+        if recorded_effect.get("asset_bytes") != len(asset):
+            mismatches.append(f"{name}:asset-bytes")
+
+    if total_bytes > EFFECTS_BUDGET_BYTES:
+        mismatches.append("asset-budget")
+    if recorded.get("total_asset_bytes") != total_bytes:
+        mismatches.append("total-asset-bytes")
+    if mismatches:
+        print("Audio assets are stale: " + ", ".join(mismatches), file=sys.stderr)
+        return 1
+    print(
+        f"Verified {len(recipes)} deterministic effects "
+        f"({total_bytes / 1024:.1f} KiB)."
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="verify that checked-in WAV files match the generator",
-    )
+    parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    recipes = sound_recipes()
-    mismatches: list[str] = []
-
-    if not args.check:
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    for name, (duration, sample) in sorted(recipes.items()):
-        path = OUTPUT_DIR / f"{name}.wav"
-        generated = render_wav(name, duration, sample)
-        if args.check:
-            if not path.exists() or path.read_bytes() != generated:
-                mismatches.append(path.name)
-        else:
-            path.write_bytes(generated)
-
-    if mismatches:
-        print("Audio assets are stale: " + ", ".join(mismatches))
-        return 1
     if args.check:
-        print(f"Verified {len(recipes)} deterministic audio assets.")
-    else:
-        total = sum((OUTPUT_DIR / f"{name}.wav").stat().st_size for name in recipes)
-        print(f"Generated {len(recipes)} audio assets ({total / 1024:.1f} KiB).")
+        return check()
+    generate()
     return 0
 
 

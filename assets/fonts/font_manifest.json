@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "unicode_spec": "U+0020-007E,U+00A0-00FF,U+2010-2027,U+2190-2195,U+21A8",
+  "fonts": {
+    "OxidefallDisplay.ttf": {
+      "source": "SairaCondensed-ExtraBold.ttf",
+      "source_sha256": "8821cabbc8bb3b0727be0a82d192c96baadbaf608012aff557eaaced1897ae84",
+      "subset_sha256": "fea8ab03d0493f7e54e2ccd5537cf0fc0c28e09edbea87977abeea5cb4745404",
+      "subset_bytes": 35228
+    },
+    "OxidefallMono.ttf": {
+      "source": "IBMPlexMono-Medium.ttf",
+      "source_sha256": "a9b4c49bb299e05b5f6c481e7fb5e78943d2793249a0c8874ab574a2d1ea6755",
+      "subset_sha256": "567452f083ff239cddba7ccf653f36ee74392ed70c920401f729ea028c6dd911",
+      "subset_bytes": 35296
+    }
+  }
+}

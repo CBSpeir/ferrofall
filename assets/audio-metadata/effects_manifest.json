@@ -1,0 +1,141 @@
+{
+  "format_version": 1,
+  "sample_rate": 32000,
+  "budget_bytes": 262144,
+  "effects": {
+    "accent_back_to_back": {
+      "master_sha256": "cea3267d2de4e295740f3538b17718c4e313b0abccca2d4731752492c818be1c",
+      "asset": "accent_back_to_back.ogg",
+      "asset_bytes": 5133,
+      "asset_sha256": "4a6a077da5b30b0c5e6d4dc01e3a1a3287d1473f2cabaeb3ae5ceb379bd4ad26"
+    },
+    "accent_combo": {
+      "master_sha256": "6224444d992a692629f4a7ca98d98019aa164c0580959f0dbf05f5dd058d8d0f",
+      "asset": "accent_combo.ogg",
+      "asset_bytes": 4359,
+      "asset_sha256": "b474b103ed6ce740b48d344dca00d159d01d3b4e3299c20d9014b7888135c8e0"
+    },
+    "accent_perfect": {
+      "master_sha256": "b74fae2cbe274ecdf3f0e12eea6f8635956c2619ae939b2b66eca9fa5a41c1cf",
+      "asset": "accent_perfect.ogg",
+      "asset_bytes": 6897,
+      "asset_sha256": "528328f1d59beeacc04b18e48083154a273512bdbf5aca4084279e1f1a81d063"
+    },
+    "accent_tspin": {
+      "master_sha256": "020d860e87168d01e11e94c9f0c18e18d462fd7b14a46df8156a067f111e90a4",
+      "asset": "accent_tspin.ogg",
+      "asset_bytes": 5032,
+      "asset_sha256": "9959bb98ddd0122817b3b0ff4dd7a2577d0735b28e4ca7e4e8f91434770cda5f"
+    },
+    "clear_double": {
+      "master_sha256": "5f5cd50c80d25f6f4acdd8393a0c9fafaccc88bda15309a1d086ccc79bec2429",
+      "asset": "clear_double.ogg",
+      "asset_bytes": 5458,
+      "asset_sha256": "a481d044b3d62c07d8639d6d83b48d0a6ff9009656c819c47d46a69a9fa164cd"
+    },
+    "clear_four": {
+      "master_sha256": "f41a4c4a0370c0bbe1ca032888b7cc8316800e6c5dc970c2b26848379b7f1039",
+      "asset": "clear_four.ogg",
+      "asset_bytes": 6798,
+      "asset_sha256": "59edc42c8ae25c8421fd277d6d585eb90119b58267769151a5acffbfd9fe3074"
+    },
+    "clear_single": {
+      "master_sha256": "0cc7284424dbf337b63e048eedf705d4f4bcd5aca86b797f953cc7d6e6993cdb",
+      "asset": "clear_single.ogg",
+      "asset_bytes": 4831,
+      "asset_sha256": "2dc13a7f34d9fff73eff02a0e6b9c869258e89d94bf85d273aa5f38f1e2a6f76"
+    },
+    "clear_triple": {
+      "master_sha256": "1e4b993ddff1d708da97572c75841a7881df42ea58397d19c5c7e04d8724d3af",
+      "asset": "clear_triple.ogg",
+      "asset_bytes": 5838,
+      "asset_sha256": "8033d78afb123fc83ec116841ef8995dc9d313ef8d58c4e587ae4919ac7b9519"
+    },
+    "contact": {
+      "master_sha256": "7360411a2f1f42b36570bd020dcf008ebbdbb871ca5ffa83540b082181322721",
+      "asset": "contact.ogg",
+      "asset_bytes": 4252,
+      "asset_sha256": "e34af443c587bd34ced0729913a1d70ba32f3f15b02c2279a92b2792f35f7cab"
+    },
+    "game_over": {
+      "master_sha256": "d88b4699a161be29f045b650c48ee324458a61fe313e0b76aec8890eb0480992",
+      "asset": "game_over.ogg",
+      "asset_bytes": 9161,
+      "asset_sha256": "f93e0fe7d94d5e94d38ce3e303652e92b348c891493a064ac957e44dcfd99d1d"
+    },
+    "game_start": {
+      "master_sha256": "0f2575636aea89d0301489dcbe2906dac3ff49ee822d33b71ec6962f938ce03c",
+      "asset": "game_start.ogg",
+      "asset_bytes": 5189,
+      "asset_sha256": "e8ad2d2a258c1e6f183e92249ad04d550f54fa4ffc0ba91c66d0a8cc63ec9c17"
+    },
+    "hard_drop": {
+      "master_sha256": "08a5e564f9c21afc765e2cd3ce4a301ff341450e5b4ffc2e45f4952ab9fbea93",
+      "asset": "hard_drop.ogg",
+      "asset_bytes": 4622,
+      "asset_sha256": "84f8946458d39219a1ff3a818a4f46487051d34f462fc01707cb352c9cd7e459"
+    },
+    "hold": {
+      "master_sha256": "6b418a2c9cd1e74b73c790cea1be3f54a094836f5f27517e8925b25302f8716a",
+      "asset": "hold.ogg",
+      "asset_bytes": 4663,
+      "asset_sha256": "894615c8a20e6668214558909bfc4d7462854416446c2ccd0840a7a9ac3902e2"
+    },
+    "level_up": {
+      "master_sha256": "86439c1546cadf1021b0fbd2195a207d4e8fe64117a6bc5bf96c4b34eb1c0840",
+      "asset": "level_up.ogg",
+      "asset_bytes": 6034,
+      "asset_sha256": "cd0e9b9263e30e24f744aca3da756f5e10c1e67b9cca42033921e8eac772745b"
+    },
+    "lock": {
+      "master_sha256": "b24cfbc6cd6ebddd9b3d56404496c4e9c5a3a846df45a5e20c77eff5544de51b",
+      "asset": "lock.ogg",
+      "asset_bytes": 4331,
+      "asset_sha256": "4d141846daf6416290f075882c5fdd7c4328ad5c2ecd597ae84497314cd04daa"
+    },
+    "move_a": {
+      "master_sha256": "eba0430bcda3e14ccd36ed6f7ff042f9cbab6f87daad20364795d2ab94f49d23",
+      "asset": "move_a.ogg",
+      "asset_bytes": 4103,
+      "asset_sha256": "a48a23c954cc0ca3c2af678f5ecea82178e74b50591e655b7c4bb3d499ea9a33"
+    },
+    "move_b": {
+      "master_sha256": "51cbf9441dd9965f4e85712a7b3a573fa9150838a66f8cfdcd571f71d8e53f67",
+      "asset": "move_b.ogg",
+      "asset_bytes": 4071,
+      "asset_sha256": "33da0ef82cb2e09163c7581482e0620c66f8df1629429df078dd9b19f8e735bc"
+    },
+    "new_best": {
+      "master_sha256": "9d8d9c89161bfcfad897774434d47503dcc630612d352affeeddee3d22ed7132",
+      "asset": "new_best.ogg",
+      "asset_bytes": 8882,
+      "asset_sha256": "7bfa021561235f331fc799b015918695c933ea8e34d17251b34f497215962a7c"
+    },
+    "pause": {
+      "master_sha256": "04a08925a1a75b06191b8a0b68dda962e29bcbdf955b2d1a28c9dce7486f4fb9",
+      "asset": "pause.ogg",
+      "asset_bytes": 4549,
+      "asset_sha256": "98c989d54d147f3efa978e409f47e87f2184b6a79cca56b2e80f239b3001fa1f"
+    },
+    "resume": {
+      "master_sha256": "2200ef2ed87629a3460ba8c755328abe2f5c396038fc7a6a4241c14738185718",
+      "asset": "resume.ogg",
+      "asset_bytes": 4317,
+      "asset_sha256": "1f6f81701c4babe40a2aa8d2596a90ce95169f2f7532011d34d4ad0f70572730"
+    },
+    "rotate": {
+      "master_sha256": "e5ffebd2bd54994b1159f0a7b3534f02436195b847134aa813c66ccc4842d165",
+      "asset": "rotate.ogg",
+      "asset_bytes": 4500,
+      "asset_sha256": "1293b6341be1d3654b4d93101436502120650c7f5c43314f0bc4a4db95659674"
+    },
+    "ui_activate": {
+      "master_sha256": "50b1ad1b166c18be45f374110e6f3222f45674a7b8fb1f321f34c522aec6ae41",
+      "asset": "ui_activate.ogg",
+      "asset_bytes": 3998,
+      "asset_sha256": "6815addd734903c525a53a2251e52fe9d9712cecfe283f54e37dd914a7e1c4dc"
+    }
+  },
+  "encoder": "vorbis-rs-quality-vbr-0.35",
+  "total_asset_bytes": 117018
+}

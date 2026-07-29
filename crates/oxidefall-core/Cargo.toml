@@ -1,0 +1,11 @@
+[package]
+name = "oxidefall-core"
+version = "0.1.0"
+edition = "2024"
+description = "Deterministic game engine for Oxidefall"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+rand = { version = "0.10.2", default-features = false, features = ["alloc"] }
+rand_chacha = { version = "0.10.0", default-features = false }

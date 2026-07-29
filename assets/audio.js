@@ -30,21 +30,20 @@
   const Context = window.AudioContext || window.webkitAudioContext;
   const canLoadAudio = Boolean(Context && typeof window.fetch === "function");
 
-  let encodedEffects = null;
-  let encodedMusic = null;
   const effectBuffers = new Map();
   const musicBuffers = new Map();
   const activeEffects = new Set();
-  let musicSources = [];
-  let musicLayerGains = [];
+  let musicSources = Array(musicStems.length).fill(null);
+  let musicLayerGains = Array(musicStems.length).fill(null);
+  const musicRequests = new Map();
   let context = null;
   let master = null;
   let effectsBus = null;
   let musicBus = null;
   let musicDuck = null;
-  let decodeStarted = false;
+  let effectsRequest = null;
   let effectsReady = false;
-  let musicReady = false;
+  let startupCuePlayed = false;
   let failed = !canLoadAudio;
   let musicFailed = !canLoadAudio;
   let muted = false;
@@ -67,21 +66,10 @@
       .catch(() => null);
   }
 
-  function prepareBank() {
-    if (encodedEffects || !canLoadAudio) return;
-    encodedEffects = new Map(
-      effectStems.map((stem) => [stem, fetchAsset(`audio/${stem}.wav`)]),
-    );
-    encodedMusic = new Map(
-      musicStems.map((stem) => [stem, fetchAsset(`audio/${stem}.ogg`)]),
-    );
-  }
-
   function ensureContext() {
     if (failed) return false;
     if (context) return true;
     try {
-      prepareBank();
       context = new Context({ latencyHint: "interactive" });
       master = context.createGain();
       effectsBus = context.createGain();
@@ -95,7 +83,6 @@
       musicBus.connect(musicDuck);
       musicDuck.connect(master);
       master.connect(context.destination);
-      decodeBank();
       return true;
     } catch (_error) {
       failed = true;
@@ -109,34 +96,40 @@
     }
   }
 
-  async function decodeMap(encoded, destination) {
-    await Promise.all(
-      [...(encoded || [])].map(async ([stem, pending]) => {
-        const bytes = await pending;
+  function loadEffects() {
+    if (effectsRequest || !context) return effectsRequest;
+    effectsRequest = Promise.all(
+      effectStems.map(async (stem) => {
+        const bytes = await fetchAsset(`audio/${stem}.ogg`);
         if (!bytes || !context) return;
         try {
-          destination.set(stem, await context.decodeAudioData(bytes.slice(0)));
+          effectBuffers.set(stem, await context.decodeAudioData(bytes.slice(0)));
         } catch (_error) {
           // Missing assets are isolated from the rest of the bank.
         }
       }),
-    );
+    ).then(() => {
+      effectsReady = effectBuffers.size === effectStems.length;
+    });
+    return effectsRequest;
   }
 
-  async function decodeBank() {
-    if (decodeStarted || !context) return;
-    decodeStarted = true;
-    prepareBank();
-    await Promise.all([
-      decodeMap(encodedEffects, effectBuffers),
-      decodeMap(encodedMusic, musicBuffers),
-    ]);
-    effectsReady = effectBuffers.size === effectStems.length;
-    musicReady = musicBuffers.size === musicStems.length;
-    musicFailed = !musicReady;
-    if (musicRequested && !musicPaused && musicReady) {
-      startMusicAtNextBar();
-    }
+  function loadMusicStem(index) {
+    const stem = musicStems[index];
+    if (!context || !stem) return Promise.resolve();
+    if (musicBuffers.has(stem)) return Promise.resolve();
+    if (musicRequests.has(stem)) return musicRequests.get(stem);
+    const request = fetchAsset(`audio/${stem}.ogg`)
+      .then(async (bytes) => {
+        if (!bytes || !context) throw new Error("music asset unavailable");
+        musicBuffers.set(stem, await context.decodeAudioData(bytes.slice(0)));
+        if (musicRequested && !musicPaused) startLoadedMusicStem(index);
+      })
+      .catch(() => {
+        if (index === 0) musicFailed = true;
+      });
+    musicRequests.set(stem, request);
+    return request;
   }
 
   function activate() {
@@ -144,6 +137,7 @@
     if (context.state !== "running") {
       context.resume().catch(() => {});
     }
+    loadEffects();
     return true;
   }
 
@@ -160,14 +154,15 @@
 
   function stopMusicSources() {
     for (const source of musicSources) {
+      if (!source) continue;
       try {
         source.stop();
       } catch (_error) {
         // A source may already have stopped between iteration and this call.
       }
     }
-    musicSources = [];
-    musicLayerGains = [];
+    musicSources = Array(musicStems.length).fill(null);
+    musicLayerGains = Array(musicStems.length).fill(null);
   }
 
   function musicDuration() {
@@ -197,42 +192,43 @@
     return index < tier ? 1 : 0;
   }
 
-  function startMusicSources(offset, when) {
-    if (!context || !musicBus || !musicReady) return;
-    stopMusicSources();
-    musicStems.forEach((stem, index) => {
-      const buffer = musicBuffers.get(stem);
-      if (!buffer) return;
-      const source = context.createBufferSource();
-      const gain = context.createGain();
-      const panner =
-        typeof context.createStereoPanner === "function"
-          ? context.createStereoPanner()
-          : null;
-      source.buffer = buffer;
-      source.loop = true;
-      source.loopStart = 0;
-      source.loopEnd = buffer.duration;
-      gain.gain.value = layerGain(index);
-      source.connect(gain);
-      if (panner) {
-        panner.pan.value = index === 1 ? -0.08 : index === 2 ? 0.08 : 0;
-        gain.connect(panner);
-        panner.connect(musicBus);
-      } else {
-        gain.connect(musicBus);
-      }
-      source.start(when, normalizeMusicPosition(offset));
-      musicSources.push(source);
-      musicLayerGains.push(gain);
-    });
+  function startMusicSource(index, offset, when) {
+    if (!context || !musicBus || musicSources[index]) return;
+    const buffer = musicBuffers.get(musicStems[index]);
+    if (!buffer) return;
+    const source = context.createBufferSource();
+    const gain = context.createGain();
+    const panner =
+      typeof context.createStereoPanner === "function"
+        ? context.createStereoPanner()
+        : null;
+    source.buffer = buffer;
+    source.loop = true;
+    source.loopStart = 0;
+    source.loopEnd = buffer.duration;
+    gain.gain.value = layerGain(index);
+    source.connect(gain);
+    if (panner) {
+      panner.pan.value = index === 1 ? -0.08 : index === 2 ? 0.08 : 0;
+      gain.connect(panner);
+      panner.connect(musicBus);
+    } else {
+      gain.connect(musicBus);
+    }
+    source.start(when, normalizeMusicPosition(offset));
+    musicSources[index] = source;
+    musicLayerGains[index] = gain;
   }
 
-  function startMusicAtNextBar() {
-    if (!context || !musicReady || musicPaused || !musicRequested) return;
+  function startMusicSources(offset, when) {
+    musicStems.forEach((_stem, index) => startMusicSource(index, offset, when));
+  }
+
+  function startLoadedMusicStem(index) {
+    if (!context || musicPaused || !musicRequested || musicSources[index]) return;
     const position = currentMusicPosition();
-    const delay = delayToNextBar(position);
-    startMusicSources(position + delay, context.currentTime + delay);
+    const delay = index === 0 ? 0.02 : delayToNextBar(position);
+    startMusicSource(index, position + delay, context.currentTime + delay);
   }
 
   function setMusicTier(tier) {
@@ -241,11 +237,15 @@
     const delay = delayToNextBar(currentMusicPosition());
     const start = context.currentTime + delay;
     for (let index = 0; index < musicLayerGains.length; index += 1) {
-      const parameter = musicLayerGains[index].gain;
+      const parameter = musicLayerGains[index]?.gain;
+      if (!parameter) continue;
       parameter.cancelScheduledValues(context.currentTime);
       parameter.setValueAtTime(parameter.value, context.currentTime);
       parameter.setValueAtTime(parameter.value, start);
       parameter.linearRampToValueAtTime(layerGain(index), start + 0.25);
+    }
+    for (let index = 0; index < musicTier; index += 1) {
+      loadMusicStem(index);
     }
   }
 
@@ -259,7 +259,9 @@
     const startAt = context.currentTime + 0.06;
     musicClockAnchor = startAt;
     musicClockRunning = true;
-    if (musicReady) startMusicSources(0, startAt);
+    loadMusicStem(0);
+    setTimeout(() => loadMusicStem(1), 15000);
+    setTimeout(() => loadMusicStem(2), 45000);
   }
 
   function pauseMusic() {
@@ -276,7 +278,7 @@
     const startAt = context.currentTime + 0.04;
     musicClockAnchor = startAt;
     musicClockRunning = true;
-    if (musicReady) {
+    if (musicBuffers.size > 0) {
       startMusicSources(musicClockOffset, startAt);
     }
   }
@@ -299,7 +301,7 @@
 
   window.oxidefallAudioAvailable = () => !failed;
   window.oxidefallMusicAvailable = () => !failed && !musicFailed;
-  window.oxidefallAudioPrepare = prepareBank;
+  window.oxidefallAudioPrepare = () => {};
   window.oxidefallAudioActivate = activate;
   window.oxidefallAudioSetMuted = (nextMuted) => {
     muted = Boolean(nextMuted);
@@ -322,7 +324,22 @@
   window.oxidefallAudioPlay = (name, gainDb, rate, pan, delaySeconds) => {
     if (!activate()) return;
     const buffer = effectBuffers.get(name);
-    if (!buffer || !effectsBus || effectsVolume <= 0) return;
+    if (!buffer || !effectsBus || effectsVolume <= 0) {
+      if (!startupCuePlayed && effectsBus && effectsVolume > 0) {
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.type = "square";
+        oscillator.frequency.value = 1080;
+        gain.gain.setValueAtTime(0.08, context.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.055);
+        oscillator.connect(gain);
+        gain.connect(effectsBus);
+        oscillator.start();
+        oscillator.stop(context.currentTime + 0.055);
+        startupCuePlayed = true;
+      }
+      return;
+    }
 
     while (activeEffects.size >= 16) {
       const oldest = activeEffects.values().next().value;
@@ -372,21 +389,28 @@
       ducked ? 0.008 : 0.06,
     );
   };
-  window.oxidefallAudioDebugState = () => ({
-    available: !failed,
-    ready: effectsReady,
-    activeVoices: activeEffects.size + musicSources.length,
-    contextState: context?.state || "uninitialized",
-    muted,
-    effectsVolume,
-    musicVolume,
-    musicAvailable: !failed && !musicFailed,
-    musicReady,
-    musicPlaying: musicSources.length === musicStems.length,
-    musicPaused,
-    musicTier,
-    musicPosition: currentMusicPosition(),
-  });
+  window.oxidefallAudioDebugState = () => {
+    const activeMusicSources = musicSources.filter(Boolean).length;
+    return {
+      available: !failed,
+      ready: effectsReady,
+      effectsRequested: effectsRequest !== null,
+      startupCuePlayed,
+      activeVoices: activeEffects.size + activeMusicSources,
+      contextState: context?.state || "uninitialized",
+      muted,
+      effectsVolume,
+      musicVolume,
+      musicAvailable: !failed && !musicFailed,
+      musicReady: musicBuffers.has(musicStems[0]),
+      musicPlaying: Boolean(musicSources[0]),
+      loadedMusicStems: musicStems.filter((stem) => musicBuffers.has(stem)),
+      requestedMusicStems: [...musicRequests.keys()],
+      musicPaused,
+      musicTier,
+      musicPosition: currentMusicPosition(),
+    };
+  };
 
   const unlock = () => activate();
   window.addEventListener("pointerdown", unlock, { capture: true });

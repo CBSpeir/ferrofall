@@ -43,15 +43,17 @@ The milestone excludes:
 
 ## Technical architecture
 
-The crate targets stable Rust 2024, forbids unsafe code in application
-sources, and builds for native platforms and `wasm32-unknown-unknown`.
+The workspace pins Rust 1.97.1 with the 2024 edition, forbids unsafe code in
+application sources, and builds for native platforms and
+`wasm32-unknown-unknown`.
 
 The dependency surface is intentionally small:
 
 - `eframe` supplies native windowing, WebAssembly integration, and egui;
 - egui is used through the `eframe` re-export;
-- `rand` supplies fresh production seeds;
-- `rand_chacha` supplies deterministic, portable bag generation;
+- `getrandom` supplies fresh production seeds at the application boundary;
+- `rand` and `rand_chacha` supply deterministic, portable bag generation in
+  the engine crate;
 - `web-time` supplies an `Instant` implementation that works on both targets;
 - Kira supplies native static-effect and streaming-music playback; and
 - browser-only dependencies enable JavaScript entropy, startup, DOM access,
@@ -73,23 +75,21 @@ The source is divided by responsibility:
   boundary;
 - `platform.rs` isolates browser storage, input capability and viewport checks,
   accessible status, test metadata, and fullscreen behavior;
+- `settings.rs` owns the versioned, app-specific appearance and audio store;
 - `theme.rs` owns stored appearance values and the semantic dark and light
   palettes;
 - `ui.rs` owns layout, painting, overlays, and visual effects;
-- `game/mod.rs` owns simulation and the command/event API;
-- `game/board.rs` owns locked cells, collision, and row compaction;
-- `game/piece.rs` owns tetromino geometry and SRS data;
-- `game/randomizer.rs` owns the seeded seven-bag;
-- `game/scoring.rs` owns score, line, combo, and level progression;
-- `assets/audio` contains generated mono WAV effects, Ogg Vorbis music stems,
-  and provenance metadata, while `assets/audio.js` supplies browser Web Audio
-  playback;
+- `crates/oxidefall-core/src/game` owns deterministic simulation, board state,
+  tetromino geometry, randomization, scoring, and the command/event API;
+- `assets/audio` contains only runtime Ogg Vorbis effects and music stems,
+  while `assets/audio-metadata` contains provenance, hashes, and budgets;
+- `assets/audio.js` supplies progressive browser Web Audio playback;
 - `index.html` owns the static full-viewport shell and branded loader; and
 - `Trunk.toml` and `.github/workflows/web.yml` own packaging, browser smoke
   tests, and Pages deployment.
 
-The engine is internal. The web-primary milestone does not promise a reusable
-library API.
+The engine is a UI-independent workspace library. Its public Rust surface is
+an internal workspace boundary, not a promised versioned external API.
 
 ## Engine boundary
 
@@ -325,10 +325,11 @@ The web build stores its best score in same-origin `localStorage`. It uses a
 versioned key, tolerates unavailable or malformed storage, and has no account
 or server synchronization. The native build retains a session-only best score.
 Both targets persist the effects volume, music volume, global mute preference,
-and System, Light, or Dark appearance preference through eframe storage. Theme
-values use a versioned key and fall back to System when storage is missing,
-unavailable, or malformed. System uses Dark when the platform cannot report a
-preference. No game state is persisted.
+and System, Light, or Dark appearance preference through Oxidefall's own
+versioned settings store. Native startup migrates the former eframe `app.ron`
+values when the new settings file is absent. Theme values fall back to System
+when storage is missing, unavailable, or malformed. System uses Dark when the
+platform cannot report a preference. No game state is persisted.
 
 The web shell keeps a visually hidden semantic status synchronized with the
 canvas screen so assistive technology and browser smoke tests can identify the
@@ -344,10 +345,10 @@ over. Failed movement and rotation attempts emit no event. The app drains each
 simulation step as a batch so the mixer can prioritize simultaneous cues.
 
 The sound bank has a restrained industrial-electronic character. Original
-mono, 16-bit, 32-kHz WAV files are generated deterministically by
-`tools/generate_audio.py`. The checked-in effects are licensed under CC0 1.0;
-the generator follows the repository's source-code license. The complete bank
-must remain below 750 KiB uncompressed.
+mono, 32-kHz Ogg Vorbis files are rendered deterministically from generated
+lossless WAV masters by `tools/generate_audio.py`. The checked-in effects are
+licensed under CC0 1.0; the generator follows the repository's source-code
+license. The complete compressed bank must remain below 256 KiB.
 
 The adaptive score is an independently created, clean-room composition. It
 does not import, transcribe, arrange, or imitate a third-party melody. Its
@@ -357,10 +358,17 @@ fixed 132-BPM form spans 64 bars, or about 116 seconds, before looping.
 
 `tools/generate_music.py` deterministically renders three synchronized mono,
 32-kHz stems. Lossless masters remain under `target`; the checked-in Ogg
-Vorbis assets and `music_manifest.json` must stay below 4 MiB combined. FFmpeg
-is the preferred development-time encoder. The repository-local Rust encoder
-is a source-built fallback. Ordinary builds consume checked-in assets and do
-not require either encoder.
+Vorbis assets and `assets/audio-metadata/music_manifest.json` must stay below
+2 MiB combined. FFmpeg is the preferred development-time encoder. The
+repository-local Rust encoder is a source-built fallback. Ordinary builds
+consume checked-in assets and do not require either encoder.
+
+The browser title screen makes no audio requests. The first user activation
+creates the audio context, starts effect loading, and synthesizes the first
+short cue if decoding has not completed. Music base loads when gameplay starts;
+drive and pressure load after 15 and 45 seconds or immediately when gameplay
+requests their tiers. Later stems enter on the next bar boundary. Missing
+effects or music never block gameplay.
 
 The music tiers are:
 
@@ -482,13 +490,13 @@ Opening it during active play pauses immediately. The gear, an outside click,
 or Escape closes it without resuming; another Escape resumes. A passive System
 theme change does not pause play.
 
-Gameplay visuals are procedural egui primitives. The app locally bundles Saira
-Condensed ExtraBold for the wordmark and major headings, and IBM Plex Mono
-Medium for controls, labels, statistics, and numbers. Both fonts use the SIL
-Open Font License 1.1. The uppercase wordmark uses slightly open tracking in
-cool off-white, while the separate falling-block mark retains the amber accent.
-The native window icon is generated from embedded RGBA data, and the web shell
-ships a matching SVG favicon.
+Gameplay visuals are procedural egui primitives. The app locally bundles
+renamed, UI-specific subsets derived from Saira Condensed ExtraBold for major
+headings and IBM Plex Mono Medium for controls, labels, statistics, and
+numbers. Both source fonts use the SIL Open Font License 1.1. The static loader
+draws the wordmark as an inline vector, so it does not download a font before
+WebAssembly starts. The native window icon is generated from embedded RGBA
+data, and the web shell ships a matching SVG favicon.
 
 Accessibility requirements include:
 
@@ -517,8 +525,12 @@ The web-primary milestone is complete only when:
 - focus, pause, orientation, multi-touch, held-input, and top-out edges are
   verified;
 - the release build runs smoothly on macOS;
-- the compressed critical web path remains at or below 3 MiB and shows the
-  title within five seconds on a normal 4G connection;
+- the compressed critical web path remains at or below 1.5 MiB, the complete
+  runtime download remains at or below 3.5 MiB, and the title appears within
+  five seconds on a normal 4G connection;
+- on the reference development machine, a warm web rebuild stays at or below
+  two seconds, a fresh development build at or below 60 seconds, and an
+  optimized production build at or below 90 seconds;
 - the release WebAssembly bundle loads in desktop and mobile-emulated Chromium
   without relevant console errors;
 - keyboard and touch title-to-playing interactions, orientation pause,
@@ -536,6 +548,7 @@ The web-primary milestone is complete only when:
 - ten consecutive music loops have no audible seam, click, or stem drift;
 - generated audio files match `tools/generate_audio.py --check` and
   `tools/generate_music.py --check`;
+- bundled fonts match `tools/generate_fonts.py --check`;
 - the static bundle works from relative paths suitable for GitHub Pages;
 - formatting, strict Clippy, and tests are clean; and
 - this specification and the README match the implementation.
